@@ -17,7 +17,6 @@ A complete Docker-based setup for **WSO2 API Manager 4.5.0** and **WSO2 Identity
 - [Troubleshooting](#troubleshooting)
 - [Container Shell Access](#container-shell-access)
 - [Configuration](#configuration)
-- [Customization](#customization)
 - [Security Notes](#security-notes)
 - [Resources](#resources)
 - [Version & Metadata](#version--metadata)
