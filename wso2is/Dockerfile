@@ -12,8 +12,8 @@ COPY --chown=wso2carbon:wso2 conf/deployment.toml /home/wso2carbon/wso2is-7.1.0/
 # Expose required ports
 # 9443: Management Console (HTTPS)
 # 9763: HTTP
-# 4000: Debug Port
-EXPOSE 9443 9763 4000
+# 5005: Debug Port (optional, uncomment port mapping in docker-compose.yml to use)
+EXPOSE 9443 9763 5005
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=5 \

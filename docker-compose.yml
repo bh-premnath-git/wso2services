@@ -48,6 +48,7 @@ services:
     ports:
       - "9444:9443"
       - "9764:9763"
+      - "5005:5005"
     environment:
       - JAVA_OPTS=-Xms512m -Xmx2048m
     depends_on:
