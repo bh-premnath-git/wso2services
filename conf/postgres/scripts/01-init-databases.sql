@@ -9,14 +9,16 @@ CREATE USER wso2carbon WITH PASSWORD 'wso2carbon';
 GRANT ALL PRIVILEGES ON DATABASE apim_db TO wso2carbon;
 GRANT ALL PRIVILEGES ON DATABASE shared_db TO wso2carbon;
 
--- Connect to apim_db and grant schema privileges
-\c apim_db
-GRANT ALL ON SCHEMA public TO wso2carbon;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO wso2carbon;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO wso2carbon;
-
 -- Connect to shared_db and grant schema privileges
 \c shared_db
 GRANT ALL ON SCHEMA public TO wso2carbon;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO wso2carbon;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO wso2carbon;
+ALTER SCHEMA public OWNER TO wso2carbon;
+
+-- Connect to apim_db and grant schema privileges
+\c apim_db
+GRANT ALL ON SCHEMA public TO wso2carbon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO wso2carbon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO wso2carbon;
+ALTER SCHEMA public OWNER TO wso2carbon;

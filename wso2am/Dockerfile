@@ -3,8 +3,11 @@ FROM wso2/wso2am:4.5.0
 # Copy PostgreSQL JDBC driver
 COPY --chown=wso2carbon:wso2 lib/postgresql-42.7.4.jar /home/wso2carbon/wso2am-4.5.0/repository/components/lib/
 
-# Copy custom configuration
-COPY --chown=wso2carbon:wso2 conf/ /home/wso2carbon/wso2am-4.5.0/repository/conf/
+# Copy only custom deployment.toml (other configs come from base image)
+COPY --chown=wso2carbon:wso2 conf/deployment.toml /home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml
+
+# Copy custom webapps if any exist (uncomment and add your WAR files to deployment/server/webapps/)
+# COPY --chown=wso2carbon:wso2 deployment/server/webapps/*.war /home/wso2carbon/wso2am-4.5.0/repository/deployment/server/webapps/
 
 # Expose required ports
 # 9443: Management Console, Publisher, Developer Portal (HTTPS)

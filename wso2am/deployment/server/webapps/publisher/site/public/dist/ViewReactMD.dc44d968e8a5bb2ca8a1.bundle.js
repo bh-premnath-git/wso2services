@@ -1,1 +1,0 @@
-"use strict";(this.webpackChunk_wso2apim_publisher=this.webpackChunk_wso2apim_publisher||[]).push([[210],{80567:(s,r,i)=>{i.r(r),i.d(r,{default:()=>a.$,uriTransformer:()=>u.Q});var u=i(32811),a=i(34680)}}]);
