@@ -21,8 +21,10 @@ exporters:
     tls:
       insecure: true
   
-  logging:
-    loglevel: debug
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
 
 extensions:
   health_check:
@@ -37,14 +39,14 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlp, logging]
+      exporters: [otlp, debug]
     
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [logging]
+      exporters: [debug]
     
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [logging]
+      exporters: [debug]
