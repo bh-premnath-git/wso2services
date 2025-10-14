@@ -40,6 +40,23 @@ services:
       - wso2-network
     restart: unless-stopped
 
+  wso2is:
+    build:
+      context: ./wso2is
+      dockerfile: Dockerfile
+    container_name: wso2is
+    ports:
+      - "9444:9443"
+      - "9764:9763"
+    environment:
+      - JAVA_OPTS=-Xms512m -Xmx2048m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - wso2-network
+    restart: unless-stopped
+
 volumes:
   postgres-data:
 
