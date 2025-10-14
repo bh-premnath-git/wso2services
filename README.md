@@ -1,4 +1,4 @@
-# WSO2 API Manager & Identity Server with PostgreSQL
+# Payment Platform
 
 A complete Docker-based setup for **WSO2 API Manager 4.5.0** and **WSO2 Identity Server 7.1.0**, fully integrated with **PostgreSQL 18.0**.
 
@@ -46,6 +46,31 @@ WSO2 API Manager 4.5.0                    WSO2 Identity Server 7.1.0
                 PostgreSQL 18.0
             (4 databases, 470 tables total)
 ```
+
+┌─────────────────────────────────────────────────────────┐
+│                   WSO2 Services Stack                    │
+├─────────────────────────────────────────────────────────┤
+│ WSO2 API Manager (9443)  │  WSO2 Identity Server (9444) │
+├──────────────────────────┴──────────────────────────────┤
+│                    App Services Layer                    │
+│  ├─ forex_service                                        │
+│  ├─ ledger_service                                       │
+│  ├─ payment_service                                      │
+│  ├─ profile_service                                      │
+│  ├─ rule_engine_service                                  │
+│  ├─ wallet_service                                       │
+│  └─ common                                               │
+├─────────────────────────────────────────────────────────┤
+│                   Data & Storage Layer                   │
+│  ├─ PostgreSQL (5432)    - Relational DB                │
+│  ├─ DynamoDB (8000)      - NoSQL DB                     │
+│  ├─ Redis (6379)         - Cache/Sessions               │
+│  └─ Redpanda (9092)      - Event Streaming              │
+├─────────────────────────────────────────────────────────┤
+│                 Observability Layer                      │
+│  ├─ Jaeger (16686)       - Tracing UI                   │
+│  └─ OTel Collector       - Telemetry Pipeline           │
+└─────────────────────────────────────────────────────────┘
 
 ## ✅ Prerequisites
 
@@ -110,7 +135,8 @@ docker compose down -v
 
 ```
 wso2services/
-├── docker-compose.yml
+├── docker-compose.yml                 # Main orchestration file
+├── README.md                          # This file
 ├── conf/postgres/scripts/
 │   ├── 01-init-databases.sql          # 4 databases + user
 │   ├── 02-shared-db-schema.sql        # APIM shared (51 tables)
@@ -121,16 +147,27 @@ wso2services/
 │   ├── Dockerfile
 │   ├── conf/deployment.toml           # PostgreSQL config
 │   └── lib/postgresql-42.7.4.jar
-└── wso2is/
-    ├── Dockerfile
-    ├── conf/deployment.toml           # PostgreSQL config
-    └── lib/postgresql-42.7.4.jar
+├── wso2is/
+│   ├── Dockerfile
+│   ├── conf/deployment.toml           # PostgreSQL config
+│   └── lib/postgresql-42.7.4.jar
+├── otel/
+│   ├── Dockerfile
+│   └── collector.yaml                 # OpenTelemetry config
+└── app_services/
+    ├── common/                        # Shared utilities
+    ├── forex_service/                 # Currency exchange service
+    ├── ledger_service/                # Transaction ledger
+    ├── payment_service/               # Payment orchestration
+    ├── profile_service/               # User profiles & KYC
+    ├── rule_engine_service/           # Business rules engine
+    └── wallet_service/                # Digital wallet management
 ```
 
-## 🗄️ Database Layout
+## 🗄️ Database Layout Postgres ( WSO2 API Manager & Identity Server )
 
 | Database | Tables | Purpose |
-|----------|--------|---------||
+|----------|--------|---------|
 | **apim_db** | 232 | API Manager data |
 | **shared_db** | 51 | API Manager shared (users, registry) |
 | **identity_db** | 127 | Identity Server data |
@@ -141,215 +178,240 @@ AM and IS have different user/registry schemas—separating avoids conflicts.
 
 **DB user (default):** `wso2carbon` / `wso2carbon`
 
-### Verify Databases
+## 🚀 Application Services
 
-```bash
-# List databases
-docker exec postgres-wso2 psql -U postgres -c "\l"
+### Microservices Architecture
 
-# Count tables (example: apim_db should be 232)
-docker exec postgres-wso2 psql -U wso2carbon -d apim_db -c \
-  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"
+The platform includes 6 FastAPI-based microservices:
+
+| Service | Port | Description | Key Features |
+|---------|------|-------------|-------------|
+| **forex-service** | 8001 | Currency exchange rates | Real-time FX data, multi-currency support |
+| **ledger-service** | 8002 | Transaction ledger | Double-entry accounting, audit trail |
+| **payment-service** | 8003 | Payment orchestration | Multi-service coordination, workflows |
+| **profile-service** | 8004 | User profiles & KYC | Identity verification, compliance |
+| **rule-engine-service** | 8005 | Business rules | Risk scoring, compliance checks |
+| **wallet-service** | 8006 | Digital wallets | Balance management, transactions |
+
+### Technology Stack
+
+#### **Core Framework**
+- ✅ **FastAPI 0.119.0+** - Latest with Pydantic v2 support
+- ✅ **Uvicorn with standard** - ASGI server with websockets, httptools
+- ✅ **Pydantic 2.10.0+** - Data validation (v2 only for Python 3.14)
+- ✅ **Pydantic Settings 2.6.0+** - Environment configuration
+
+#### **Infrastructure Clients**
+- ✅ **psycopg[binary] 3.2.0+** - PostgreSQL async driver
+- ✅ **aioboto3 13.2.0+** - DynamoDB async client
+- ✅ **redis[hiredis] 5.2.0+** - Redis with C parser
+- ✅ **aiokafka 0.11.0+** - Redpanda/Kafka async client
+- ✅ **httpx 0.28.0+** - Async HTTP client
+
+#### **Observability Stack**
+- ✅ **OpenTelemetry API 1.28.0+** - Tracing/metrics API
+- ✅ **OpenTelemetry SDK 1.28.0+** - Implementation
+- ✅ **FastAPI Instrumentation** - Auto-tracing for FastAPI
+- ✅ **OTLP Exporter** - Sends to Jaeger/OTel Collector
+
+#### **Security & Auth**
+- ✅ **python-jose[cryptography]** - JWT token handling
+- ✅ **passlib[bcrypt]** - Password hashing
+- ✅ **python-multipart** - Form/file upload support
+
+#### **Testing**
+- ✅ **pytest 8.3.0+** - Testing framework
+- ✅ **pytest-asyncio** - Async test support
+
+### API Documentation
+
+Each service provides auto-generated API documentation:
+
+- **Swagger UI**: `http://localhost:800X/docs`
+- **ReDoc**: `http://localhost:800X/redoc`
+- **OpenAPI JSON**: `http://localhost:800X/openapi.json`
+
+(Replace `X` with service port number 1-6)
+
+### Service Dependencies
+
+```
+payment-service
+├── Depends on: forex-service, ledger-service, wallet-service, rule-engine-service
+├── Database: PostgreSQL (payment_db), Redis (DB 2)
+└── Events: Publishes to Redpanda
+
+wallet-service
+├── Depends on: ledger-service
+├── Database: PostgreSQL (wallet_db), Redis (DB 5)
+└── Events: Publishes to Redpanda
+
+profile-service
+├── Depends on: WSO2 Identity Server
+├── Database: PostgreSQL (profile_db), Redis (DB 3)
+└── Integration: OAuth2/OIDC with WSO2 IS
 ```
 
-## ✅ Health Checks & Verification
+## 🔍 Health Checks & Verification
 
-### 1) Container Status
+### Check Service Status
 
 ```bash
+# View all container status
 docker compose ps
-# Expect: postgres-wso2=healthy, wso2am=healthy (~3m), wso2is=healthy (~3m)
 
-2) Error-free logs
-docker logs wso2am 2>&1 | grep -i ERROR | tail -20
-docker logs wso2is 2>&1 | grep -i ERROR | tail -20
-docker logs postgres-wso2 2>&1 | grep -i ERROR | tail -20
+# Check specific service health
+curl http://localhost:8001/health  # Forex service
+curl http://localhost:8002/health  # Ledger service
+curl http://localhost:8003/health  # Payment service
+curl http://localhost:8004/health  # Profile service
+curl http://localhost:8005/health  # Rule engine
+curl http://localhost:8006/health  # Wallet service
 
-3) DB connectivity from app containers
-docker exec wso2am nc -zv postgres 5432
-docker exec wso2is nc -zv postgres 5432
+# Check WSO2 services
+curl -k https://localhost:9443/carbon/  # API Manager
+curl -k https://localhost:9444/carbon/  # Identity Server
 
-4) Expected table counts
-docker exec postgres-wso2 psql -U wso2carbon -d apim_db -c \
-  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"    # expect 232
-docker exec postgres-wso2 psql -U wso2carbon -d identity_db -c \
-  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"    # expect 127
+# Check infrastructure
+curl http://localhost:16686/  # Jaeger UI
+```
 
-5) Port availability
-sudo netstat -tlnp | grep -E '9443|9444|5432'
+### View Logs
 
-6) Web consoles reachable
-curl -k https://localhost:9443/carbon/admin/login.jsp
-curl -k https://localhost:9444/carbon/admin/login.jsp
+```bash
+# All services
+docker compose logs -f
 
-7) Quick status snapshot
-echo "=== Container Status ==="
-docker compose ps
-echo -e "\n=== Resource Usage ==="
-docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
-echo -e "\n=== DB Connections ==="
-docker exec postgres-wso2 psql -U postgres -c \
-  "SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname;"
+# Specific service
+docker compose logs -f forex-service
+docker compose logs -f wso2am
+docker compose logs -f postgres
+```
 
-Troubleshooting
+## 🐛 Troubleshooting
 
-Containers not healthy
+### Common Issues
 
-Increase JVM heap (see Adjust JVM Memory
-)
+**Services won't start**
+```bash
+# Check port conflicts
+sudo lsof -i :9443  # API Manager
+sudo lsof -i :8001  # Forex service
 
-Fix DB connection issues (hostnames, credentials)
+# Check disk space
+df -h
 
-Resolve port conflicts (see Ports & Endpoints
-)
+# Check Docker resources
+docker system df
+```
 
-Wrong table counts
+**Database connection errors**
+```bash
+# Verify PostgreSQL is ready
+docker compose exec postgres pg_isready -U postgres
 
-Init scripts may have been skipped; reset volumes:
+# Check database exists
+docker compose exec postgres psql -U postgres -l
+```
 
-docker compose down -v && docker compose up -d --build
+**Build failures**
+```bash
+# Clean rebuild
+docker compose down -v
+docker compose build --no-cache
+docker compose up -d
+```
 
+## 🔧 Container Shell Access
 
-Connection errors
+```bash
+# PostgreSQL
+docker compose exec postgres psql -U wso2carbon -d apim_db
 
-PostgreSQL max_connections hit (default here often set ≈300)
-
-App pool exhausted; raise pool limits (see Connection Pool
-)
-
-Container Shell Access
 # WSO2 API Manager
-docker exec -it wso2am bash
-docker exec -it wso2am tail -f /home/wso2carbon/wso2am-4.5.0/repository/logs/wso2carbon.log
+docker compose exec wso2am bash
 
-# WSO2 Identity Server
-docker exec -it wso2is bash
-docker exec -it wso2is tail -f /home/wso2carbon/wso2is-7.1.0/repository/logs/wso2carbon.log
+# Application service
+docker compose exec forex-service bash
 
-# PostgreSQL (psql)
-docker exec -it postgres-wso2 psql -U wso2carbon -d identity_db
+# Redis CLI
+docker compose exec redis redis-cli -a redis-secret
+```
 
-Configuration
-WSO2 API Manager deployment.toml
-[database.apim_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/apim_db"
-username = "wso2carbon"
-password = "wso2carbon"
+## ⚙️ Configuration
 
-[database.shared_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/shared_db"
-username = "wso2carbon"
-password = "wso2carbon"
+### Environment Variables
 
-WSO2 Identity Server deployment.toml
-[database.identity_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/identity_db"
-username = "wso2carbon"
-password = "wso2carbon"
+Services use environment variables for configuration (see `docker-compose.yml`):
 
-[database.shared_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/shared_db_is"
-username = "wso2carbon"
-password = "wso2carbon"
+- **DATABASE_URL** - PostgreSQL connection string
+- **REDIS_URL** - Redis connection string
+- **KAFKA_BOOTSTRAP_SERVERS** - Redpanda brokers
+- **OTEL_EXPORTER_OTLP_ENDPOINT** - OpenTelemetry collector
+- **WSO2_IS_URL** - Identity Server endpoint
 
+### Customization
 
-JDBC driver: lib/postgresql-42.7.4.jar is copied into both products’ libs.
+**WSO2 configurations**: Edit `wso2am/conf/deployment.toml` or `wso2is/conf/deployment.toml`
 
-Customization
-Change Database Password
+**Database schemas**: Modify SQL files in `conf/postgres/scripts/`
 
-Edit conf/postgres/scripts/01-init-databases.sql:
+**Service code**: Update files in `app_services/<service_name>/app/`
 
-CREATE USER wso2carbon WITH PASSWORD 'newpassword';
+## 🔒 Security Notes
 
+> ⚠️ **WARNING**: This setup is for development/evaluation only. DO NOT expose to the internet without hardening.
 
-Update both:
+### For Production:
 
-wso2am/conf/deployment.toml
+1. **Change default passwords**
+   - WSO2 admin credentials
+   - PostgreSQL passwords
+   - Redis password
 
-wso2is/conf/deployment.toml
+2. **Enable SSL/TLS**
+   - Configure proper certificates for WSO2 services
+   - Enable TLS for PostgreSQL connections
+   - Use Redis TLS mode
 
-Rebuild/restart:
+3. **Network security**
+   - Use Docker secrets for sensitive data
+   - Implement network segmentation
+   - Add firewall rules
 
-docker compose down -v && docker compose up -d --build
+4. **Authentication**
+   - Integrate OAuth2/JWT for API services
+   - Enable mutual TLS between services
+   - Configure WSO2 IS for centralized auth
 
-Adjust JVM Memory
-# docker-compose.yml
-wso2am:
-  environment:
-    - JAVA_OPTS=-Xms1024m -Xmx4096m
+## 📚 Resources
 
-wso2is:
-  environment:
-    - JAVA_OPTS=-Xms1024m -Xmx4096m
+- **WSO2 API Manager Docs** — https://apim.docs.wso2.com/
+- **WSO2 Identity Server Docs** — https://is.docs.wso2.com/
+- **PostgreSQL Docs** — https://www.postgresql.org/docs/
+- **FastAPI** — https://fastapi.tiangolo.com/
+- **Docker Compose** — https://docs.docker.com/compose/
+- **OpenTelemetry** — https://opentelemetry.io/
 
+## 📝 Version & Metadata
 
-Or with GC tuning:
+| Component | Version |
+|-----------|----------|
+| WSO2 API Manager | 4.5.0 |
+| WSO2 Identity Server | 7.1.0 |
+| PostgreSQL | 18.0 |
+| Python | 3.14 |
+| FastAPI | 0.119.0+ |
+| Redis | 8.2.2 |
+| Redpanda | v25.2.9 |
+| DynamoDB Local | Latest |
+| Jaeger | Latest |
 
-environment:
-  - JAVA_OPTS=-Xms2048m -Xmx4096m -XX:+UseG1GC -XX:MaxGCPauseMillis=200
+**Last Updated:** October 14, 2025
 
-Add Custom Web Apps
+---
 
-Place WAR under:
-
-wso2am/deployment/server/webapps/
-
-wso2is/deployment/server/webapps/
-
-Uncomment COPY in the respective Dockerfile.
-
-Rebuild:
-
-docker compose up -d --build wso2am   # or wso2is
-
-Connection Pool (both products)
-[database.*.pool_options]
-maxActive = 150
-maxWait = 60000
-minIdle = 10
-testOnBorrow = true
-validationInterval = 30000
-
-PostgreSQL tuning
-# docker-compose.yml
-postgres:
-  command: >
-    postgres
-    -c max_connections=500
-    -c shared_buffers=512MB
-    -c effective_cache_size=2GB
-
-Security Notes
-
-Change default passwords (admin/admin, DB user) before any shared environment.
-
-TLS/Truststores: Use proper certificates and configure product truststores/keystores.
-
-Network exposure: Keep services bound to localhost during development; restrict ports with firewall rules.
-
-Backups: Persist DB volumes and schedule regular backups if keeping state.
-
-Resources
-
-WSO2 API Manager Docs — https://apim.docs.wso2.com/
-
-WSO2 Identity Server Docs — https://is.docs.wso2.com/
-
-PostgreSQL Docs — https://www.postgresql.org/docs/
-
-Docker Compose — https://docs.docker.com/compose/
-
-Version & Metadata
-
-WSO2 APIM: 4.5.0
-
-WSO2 IS: 7.1.0
-
-PostgreSQL: 18.0
-
-Last Updated: October 14, 2025
+**Total Service Count:** 14 Services
+- 2 WSO2 Services (API Manager, Identity Server)
+- 6 Application Services (FastAPI microservices)
+- 6 Infrastructure Services (PostgreSQL, Redis, DynamoDB, Redpanda, Jaeger, OTel Collector)
