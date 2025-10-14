@@ -72,6 +72,200 @@ WSO2 API Manager 4.5.0                    WSO2 Identity Server 7.1.0
 │  └─ OTel Collector       - Telemetry Pipeline           │
 └─────────────────────────────────────────────────────────┘
 
+## 🔐 Authentication & Authorization
+
+### Architecture Overview
+
+```
+User → WSO2 IS (OAuth2/OIDC) → Access Token
+                                     ↓
+External Client → WSO2 API Manager Gateway (Token Validation)
+                                     ↓
+              API Manager validates token with WSO2 IS Key Manager
+                                     ↓
+              Routes to internal microservices (gRPC/REST)
+                                     ↓
+              Services communicate internally via gRPC
+```
+
+### Layer Breakdown
+
+#### **Layer 1: Identity & Access**
+- **WSO2 Identity Server (9444)** - OAuth2/OIDC provider
+  - User authentication, SSO, MFA
+  - Token issuance (JWT/OAuth2)
+  - Identity federation (SAML, OAuth2)
+
+#### **Layer 2: API Gateway**
+- **WSO2 API Manager (9443, 8280, 8243)**
+  - Token validation via IS Key Manager
+  - Rate limiting, throttling, transformation
+  - API analytics and monitoring
+  - Request/response mediation
+
+#### **Layer 3: Microservices (Internal Communication)**
+- **HTTP/REST**: External clients → API Gateway → Services
+- **gRPC**: Service-to-service internal communication
+- **Six services**: Forex, Ledger, Payment, Profile, Rule Engine, Wallet
+
+#### **Layer 4: Data & Infrastructure**
+- **PostgreSQL (5432)** - Relational data
+- **Redis (6379)** - Caching/sessions
+- **DynamoDB (8000)** - NoSQL data
+- **Redpanda (9092)** - Event streaming
+- **Jaeger (16686)** - Distributed tracing
+
+### Authentication Flow
+
+#### **1. User Authentication**
+
+```mermaid
+sequenceDiagram
+    User->>WSO2 IS: Login Request
+    WSO2 IS->>WSO2 IS: Validate Credentials
+    WSO2 IS->>User: OAuth2/JWT Tokens
+    Note right of User: access_token<br/>refresh_token<br/>id_token
+```
+
+**Steps:**
+1. User → Login Request → WSO2 IS
+2. WSO2 IS validates credentials
+3. WSO2 IS issues OAuth2/JWT tokens
+4. Client receives: `access_token`, `refresh_token`, `id_token`
+
+#### **2. API Request Flow**
+
+```mermaid
+sequenceDiagram
+    Client->>API Manager: API Request + Bearer Token
+    API Manager->>WSO2 IS: Token Validation
+    WSO2 IS->>API Manager: Token Valid
+    API Manager->>Service: Route Request
+    Service->>API Manager: Response
+    API Manager->>Client: Response
+```
+
+**Steps:**
+1. Client → API Request + Bearer Token → API Manager Gateway
+2. API Manager → Token Validation → WSO2 IS Key Manager
+3. WSO2 IS validates token signature, expiry, scopes
+4. API Manager → Routes to backend service (with validated token)
+5. Service → Processes request → Response
+6. API Manager → Returns response to client
+
+#### **3. Service-to-Service Communication**
+
+```
+Payment Service → gRPC call → Ledger Service
+                            → Forex Service
+                            → Wallet Service
+                            → Rule Engine Service
+
+(Internal gRPC uses mTLS, no token propagation needed)
+```
+
+**Characteristics:**
+- **Protocol**: gRPC with Protocol Buffers
+- **Security**: Mutual TLS (mTLS) between services
+- **Discovery**: Service mesh or static configuration
+- **Tracing**: OpenTelemetry for distributed tracing
+
+### Token Types
+
+| Token Type | Purpose | Lifetime | Storage |
+|------------|---------|----------|----------|
+| **Access Token** | API authorization | 1 hour | Memory only |
+| **Refresh Token** | Renew access token | 30 days | Secure storage |
+| **ID Token** | User identity info | 1 hour | Memory only |
+
+### Security Features
+
+#### **WSO2 Identity Server**
+- ✅ OAuth 2.0 / OpenID Connect
+- ✅ SAML 2.0 SSO
+- ✅ Multi-Factor Authentication (MFA)
+- ✅ Adaptive Authentication
+- ✅ Fine-grained authorization
+
+#### **WSO2 API Manager**
+- ✅ JWT token validation
+- ✅ OAuth2 scopes enforcement
+- ✅ Rate limiting per token
+- ✅ IP whitelisting/blacklisting
+- ✅ Request/response transformation
+
+#### **Microservices**
+- ✅ gRPC with mTLS
+- ✅ Service-level authorization
+- ✅ Distributed tracing (Jaeger)
+- ✅ Circuit breakers
+- ✅ Request validation
+
+### Common Utilities Structure
+
+```
+app_services/
+├── common/                    # Shared utilities & middleware
+│   ├── __init__.py
+│   ├── auth/                  # JWT/OAuth2 validation
+│   │   ├── jwt_validator.py
+│   │   ├── oauth2_client.py
+│   │   └── token_introspection.py
+│   ├── grpc_client/           # gRPC client helpers
+│   │   ├── base_client.py
+│   │   └── interceptors.py
+│   ├── middleware/            # FastAPI middleware
+│   │   ├── auth_middleware.py
+│   │   ├── logging_middleware.py
+│   │   └── tracing_middleware.py
+│   ├── observability/         # Logging, tracing
+│   │   ├── logger.py
+│   │   ├── metrics.py
+│   │   └── tracer.py
+│   └── utils/                 # Common helpers
+│       ├── config.py
+│       ├── exceptions.py
+│       └── validators.py
+└── protos/                    # gRPC protocol definitions
+    ├── forex.proto
+    ├── ledger.proto
+    ├── payment.proto
+    ├── profile.proto
+    ├── rule_engine.proto
+    └── wallet.proto
+```
+
+### Integration Points
+
+#### **External → Platform**
+```
+Mobile/Web App
+    ↓ (HTTPS + OAuth2)
+WSO2 API Manager Gateway
+    ↓ (Token Validation)
+WSO2 Identity Server
+    ↓ (Routing)
+Microservices
+```
+
+#### **Service → Service**
+```
+Payment Service
+    ↓ (gRPC + mTLS)
+Ledger/Forex/Wallet Services
+    ↓ (Events)
+Redpanda Event Bus
+```
+
+#### **Service → Data**
+```
+Microservices
+    ├─→ PostgreSQL (relational)
+    ├─→ DynamoDB (NoSQL)
+    ├─→ Redis (cache)
+    └─→ Redpanda (events)
+```
+
 ## ✅ Prerequisites
 
 - **Docker** 20.10+
