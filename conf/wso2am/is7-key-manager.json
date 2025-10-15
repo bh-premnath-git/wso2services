@@ -1,0 +1,57 @@
+{
+  "name": "WSO2-IS-KeyManager",
+  "displayName": "WSO2 Identity Server 7.1.0",
+  "type": "WSO2-IS",
+  "description": "WSO2 Identity Server as external Key Manager for user authentication and token validation",
+  "enabled": true,
+  "availableGrantTypes": [
+    "client_credentials",
+    "password",
+    "refresh_token",
+    "authorization_code"
+  ],
+  "configuration": {
+    "ServerURL": "https://wso2is:9444/services",
+    "Username": "admin",
+    "Password": "admin",
+    "TokenURL": "https://localhost:9444/oauth2/token",
+    "RevokeURL": "https://localhost:9444/oauth2/revoke",
+    "IntrospectURL": "https://localhost:9444/oauth2/introspect",
+    "UserInfoURL": "https://localhost:9444/oauth2/userinfo",
+    "AuthorizeURL": "https://localhost:9444/oauth2/authorize",
+    "RegistrationEndpoint": "https://localhost:9444/api/identity/oauth2/dcr/v1.1/register",
+    "TokenEndpoint": "https://localhost:9444/oauth2/token",
+    "RevokeEndpoint": "https://localhost:9444/oauth2/revoke",
+    "IntrospectionEndpoint": "https://localhost:9444/oauth2/introspect",
+    "UserInfoEndpoint": "https://localhost:9444/oauth2/userinfo",
+    "AuthorizationEndpoint": "https://localhost:9444/oauth2/authorize",
+    "JWKSEndpoint": "https://localhost:9444/oauth2/jwks",
+    "issuer": "https://localhost:9444/oauth2/token",
+    "self_validate_jwt": false,
+    "enable_token_generation": true,
+    "enable_token_validation": true,
+    "enable_token_encryption": false,
+    "enable_map_oauth_consumer_apps": true,
+    "enable_oauth_app_creation": true,
+    "token_validation_method": "introspect",
+    "ValidityTime": "3600",
+    "certificate": {
+      "type": "JWKS",
+      "value": "https://localhost:9444/oauth2/jwks"
+    },
+    "claim_mappings": [
+      {
+        "remoteClaim": "sub",
+        "localClaim": "http://wso2.org/claims/enduser"
+      },
+      {
+        "remoteClaim": "username",
+        "localClaim": "http://wso2.org/claims/username"
+      },
+      {
+        "remoteClaim": "email",
+        "localClaim": "http://wso2.org/claims/emailaddress"
+      }
+    ]
+  }
+}

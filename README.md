@@ -613,3 +613,6 @@ Services use environment variables for configuration (see `docker-compose.yml`):
 ./app_scripts/configure_keymanager.sh
 ./app_scripts/setup_is_users_roles.sh
 ./app_scripts/check_keymanager.sh
+
+./app_scripts/register_apis.sh
+./app_scripts/deploy_apis_to_gateway.sh
