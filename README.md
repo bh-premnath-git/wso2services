@@ -608,3 +608,8 @@ Services use environment variables for configuration (see `docker-compose.yml`):
 - 2 WSO2 Services (API Manager, Identity Server)
 - 6 Application Services (FastAPI microservices)
 - 6 Infrastructure Services (PostgreSQL, Redis, DynamoDB, Redpanda, Jaeger, OTel Collector)
+
+./conf/postgres/apply-consent-schema.sh
+./app_scripts/configure_keymanager.sh
+./app_scripts/setup_is_users_roles.sh
+./app_scripts/check_keymanager.sh

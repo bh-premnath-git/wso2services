@@ -1,0 +1,171 @@
+# WSO2 API Manager - API Configuration
+# This file defines APIs to be created and published in WSO2 API Manager
+# Services will be registered with WSO2 IS Key Manager for OAuth2 authentication
+
+apis:
+  - name: "Forex Service API"
+    context: "/forex"
+    version: "v1"
+    backend_url: "http://forex-service:8001"
+    description: "Forex rate conversion and currency exchange service"
+    tags: ["forex", "currency", "exchange"]
+    resources:
+      - path: "/health"
+        method: "GET"
+        auth: "None"
+      - path: "/rates"
+        method: "GET"
+        auth: "Application & Application User"
+      - path: "/convert"
+        method: "POST"
+        auth: "Application & Application User"
+
+  - name: "Profile Service API"
+    context: "/profile"
+    version: "v1"
+    backend_url: "http://profile-service:8004"
+    description: "User profile management and KYC service"
+    tags: ["profile", "user", "kyc"]
+    resources:
+      - path: "/health"
+        method: "GET"
+        auth: "None"
+      - path: "/users/*"
+        method: "GET"
+        auth: "Application & Application User"
+      - path: "/users"
+        method: "POST"
+        auth: "Application & Application User"
+      - path: "/users/*"
+        method: "PUT"
+        auth: "Application & Application User"
+
+  - name: "Payment Service API"
+    context: "/payment"
+    version: "v1"
+    backend_url: "http://payment-service:8003"
+    description: "Payment processing and transaction service"
+    tags: ["payment", "transaction", "processing"]
+    resources:
+      - path: "/health"
+        method: "GET"
+        auth: "None"
+      - path: "/payments"
+        method: "POST"
+        auth: "Application & Application User"
+      - path: "/payments/*"
+        method: "GET"
+        auth: "Application & Application User"
+
+  - name: "Ledger Service API"
+    context: "/ledger"
+    version: "v1"
+    backend_url: "http://ledger-service:8002"
+    description: "Financial ledger and accounting service"
+    tags: ["ledger", "accounting", "finance"]
+    resources:
+      - path: "/health"
+        method: "GET"
+        auth: "None"
+      - path: "/entries"
+        method: "GET"
+        auth: "Application & Application User"
+      - path: "/entries"
+        method: "POST"
+        auth: "Application & Application User"
+      - path: "/balance/*"
+        method: "GET"
+        auth: "Application & Application User"
+
+  - name: "Wallet Service API"
+    context: "/wallet"
+    version: "v1"
+    backend_url: "http://wallet-service:8006"
+    description: "Digital wallet and balance management service"
+    tags: ["wallet", "balance", "digital-wallet"]
+    resources:
+      - path: "/health"
+        method: "GET"
+        auth: "None"
+      - path: "/wallets/*"
+        method: "GET"
+        auth: "Application & Application User"
+      - path: "/wallets"
+        method: "POST"
+        auth: "Application & Application User"
+      - path: "/wallets/*/balance"
+        method: "GET"
+        auth: "Application & Application User"
+
+  - name: "Rule Engine Service API"
+    context: "/rules"
+    version: "v1"
+    backend_url: "http://rule-engine-service:8005"
+    description: "Business rules engine and validation service"
+    tags: ["rules", "engine", "validation"]
+    resources:
+      - path: "/health"
+        method: "GET"
+        auth: "None"
+      - path: "/rules"
+        method: "GET"
+        auth: "Application & Application User"
+      - path: "/rules/evaluate"
+        method: "POST"
+        auth: "Application & Application User"
+
+# API Manager Gateway Configuration
+gateway:
+  host: "wso2am"
+  port: 8243
+  external_host: "localhost"
+  external_port: 8243
+
+# Key Manager Configuration
+key_manager:
+  name: "WSO2-IS-KeyManager"
+  token_endpoint: "https://wso2is:9443/oauth2/token"
+  revoke_endpoint: "https://wso2is:9443/oauth2/revoke"
+  introspect_endpoint: "https://wso2is:9443/oauth2/introspect"
+
+# Application Configuration
+applications:
+  - name: "FinanceApp"
+    description: "Finance microservices application"
+    throttling_tier: "Unlimited"
+    token_type: "JWT"
+    subscribed_apis:
+      - "Forex Service API"
+      - "Payment Service API"
+      - "Ledger Service API"
+      - "Wallet Service API"
+  
+  - name: "UserManagementApp"
+    description: "User and profile management application"
+    throttling_tier: "Unlimited"
+    token_type: "JWT"
+    subscribed_apis:
+      - "Profile Service API"
+      - "Rule Engine Service API"
+
+  - name: "AllServicesApp"
+    description: "Application with access to all microservices"
+    throttling_tier: "Unlimited"
+    token_type: "JWT"
+    subscribed_apis:
+      - "Forex Service API"
+      - "Profile Service API"
+      - "Payment Service API"
+      - "Ledger Service API"
+      - "Wallet Service API"
+      - "Rule Engine Service API"
+
+# Default Settings
+defaults:
+  visibility: "PUBLIC"
+  subscription_availability: "ALL_TENANTS"
+  transport: ["http", "https"]
+  cors_enabled: true
+  response_caching: false
+  throttling_tier: "Unlimited"
+  business_plan: "Unlimited"

@@ -94,3 +94,12 @@ minIdle = 5
 testOnBorrow = true
 validationInterval = 30000
 defaultAutoCommit = false
+
+# Enable DCR (Dynamic Client Registration) endpoint
+# Required for OAuth application registration via API
+[[resource.access_control]]
+context = "(.*)/api/identity/oauth2/dcr(.*)"
+secure = true
+http_method = "all"
+permissions = ["/permission/admin/manage/identity/applicationmgt"]
+scopes = []
