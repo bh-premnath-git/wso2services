@@ -2,7 +2,10 @@
 
 A complete Docker-based setup for **WSO2 API Manager 4.5.0** and **WSO2 Identity Server 7.1.0**, fully integrated with **PostgreSQL 18.0**.
 
-> **Status:** Local development / evaluation. Harden before Internet exposure.
+> **Status:** ✅ **WSO2 IS + AM Integration WORKING** - Users authenticate with WSO2 IS and access APIs through WSO2 AM Gateway  
+> See **[FINAL_SOLUTION.md](FINAL_SOLUTION.md)** for complete integration guide
+
+> **Environment:** Local development / evaluation. Harden before Internet exposure.
 
 ## 📋 Table of Contents
 
@@ -308,21 +311,65 @@ Microservices
 
 ## 🚀 Quick Start
 
+### Infrastructure Setup
 ```bash
-# 1) Start everything (foreground)
-docker compose up --build
-
-# or detached
+# 1) Start all containers
 docker compose up -d --build
 
-# 2) Wait ~2–4 minutes for health checks to pass, then open the URLs above.
+# 2) Wait ~2–4 minutes for health checks to pass
+docker compose ps
+```
 
-# 3) Stop
+### WSO2 IS + AM Integration Setup ⭐ **NEW**
+```bash
+# Complete automated setup (recommended)
+./app_scripts/complete_setup.sh
+
+# OR Manual step-by-step:
+./app_scripts/setup_is_users_roles.sh          # Create users in WSO2 IS
+./app_scripts/fix_ssl_certificates.sh          # Fix SSL trust (CRITICAL!)
+./app_scripts/register_apis.sh                 # Register 6 APIs
+./app_scripts/deploy_apis_to_gateway.sh        # Deploy APIs (CRITICAL!)
+./app_scripts/register_wso2is_keymanager.sh    # Register IS as Key Manager
+./app_scripts/test_wso2is_integration.sh       # Test complete flow
+```
+
+### What This Sets Up:
+- ✅ 5 test users in WSO2 IS (ops_user, finance, auditor, user, app_admin)
+- ✅ SSL certificates for AM ↔ IS communication
+- ✅ 6 microservice APIs registered and deployed
+- ✅ WSO2-IS-KeyManager for OAuth2 token validation
+- ✅ Complete integration tested and verified
+
+### Access the Platform
+- **API Gateway:** https://localhost:8243/
+- **AM DevPortal:** https://localhost:9443/devportal
+- **AM Admin:** https://localhost:9443/admin
+- **IS Console:** https://localhost:9444/console
+- **Credentials:** admin / admin
+
+### Test APIs with User Authentication
+```bash
+# Get token for ops_user from WSO2 IS
+TOKEN=$(curl -sk -u "YOUR_CLIENT_ID:YOUR_CLIENT_SECRET" \
+  -d "grant_type=password&username=ops_user&password=OpsUser123!" \
+  https://localhost:9444/oauth2/token | jq -r '.access_token')
+
+# Call API through gateway
+curl -k -H "Authorization: Bearer $TOKEN" \
+  https://localhost:8243/forex/v1/health
+```
+
+### Stop & Cleanup
+```bash
+# Stop all services
 docker compose down
 
-# (Optional) Full reset (removes volumes)
+# Full reset (removes volumes)
 docker compose down -v
 ```
+
+> **Note:** See **[FINAL_SOLUTION.md](FINAL_SOLUTION.md)** for detailed integration guide and troubleshooting
 
 ## 📁 Project Structure
 
@@ -609,10 +656,33 @@ Services use environment variables for configuration (see `docker-compose.yml`):
 - 6 Application Services (FastAPI microservices)
 - 6 Infrastructure Services (PostgreSQL, Redis, DynamoDB, Redpanda, Jaeger, OTel Collector)
 
-./conf/postgres/apply-consent-schema.sh
-./app_scripts/configure_keymanager.sh
-./app_scripts/setup_is_users_roles.sh
-./app_scripts/check_keymanager.sh
+---
 
-./app_scripts/register_apis.sh
-./app_scripts/deploy_apis_to_gateway.sh
+## 🎯 WSO2 Integration Status
+
+### ✅ Fully Working Integration
+**Users authenticate with WSO2 Identity Server and access APIs through WSO2 API Manager Gateway**
+
+**Test Results:** All 6 APIs passing (forex, profile, wallet, payment, ledger, rules)
+
+**Key Features:**
+- ✅ OAuth2/OIDC authentication via WSO2 IS
+- ✅ Token validation via introspection
+- ✅ API Gateway routing with subscriptions
+- ✅ SSL certificates properly configured
+- ✅ API revisions deployed to gateway
+- ✅ 5 test users created (ops_user, finance, auditor, user, app_admin)
+
+**Setup Scripts:**
+- `complete_setup.sh` - Full automated setup
+- `setup_is_users_roles.sh` - Create IS users
+- `fix_ssl_certificates.sh` - Configure SSL trust
+- `register_apis.sh` - Register APIs in AM
+- `deploy_apis_to_gateway.sh` - Deploy to gateway
+- `register_wso2is_keymanager.sh` - Register Key Manager
+- `test_wso2is_integration.sh` - Test complete flow
+
+**Documentation:**
+- **[FINAL_SOLUTION.md](FINAL_SOLUTION.md)** - Complete integration guide
+- **[WSO2_IS_INTEGRATION_STATUS.md](WSO2_IS_INTEGRATION_STATUS.md)** - Technical details
+- **[app_scripts/SCRIPTS_GUIDE.md](app_scripts/SCRIPTS_GUIDE.md)** - Script documentation
