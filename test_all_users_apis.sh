@@ -12,9 +12,27 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# OAuth Credentials
-CLIENT_ID="eV6gdOIlD8XmYGZd7fuK47A4jmsa"
-CLIENT_SECRET="dL60GCNtzxJUn1a2NAO7f6C5AjRHfjZRYXEGUzw059Ma"
+# Load OAuth Credentials from file
+CREDS_FILE=".oauth_credentials"
+
+if [ ! -f "$CREDS_FILE" ]; then
+    echo -e "${RED}ERROR:${NC} Credentials file not found: $CREDS_FILE"
+    echo ""
+    echo "Please run the complete setup first:"
+    echo "  ./complete_startup.sh"
+    echo ""
+    echo "Or register APIs manually:"
+    echo "  ./app_scripts/register_apis.sh"
+    exit 1
+fi
+
+source "$CREDS_FILE"
+
+if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
+    echo -e "${RED}ERROR:${NC} Invalid credentials in $CREDS_FILE"
+    echo "Please re-run: ./app_scripts/register_apis.sh"
+    exit 1
+fi
 
 # API endpoints
 declare -a APIS=(

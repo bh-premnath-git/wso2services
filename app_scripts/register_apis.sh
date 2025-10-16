@@ -328,6 +328,15 @@ echo "  curl -k -H \"Authorization: Bearer \$TOKEN\" \\"
 echo "    ${GATEWAY_URL}/forex/v1/health"
 echo ""
 
-# Save credentials
-echo "$CONSUMER_KEY:$CONSUMER_SECRET" > /tmp/apim_credentials.txt
-log_info "Credentials saved to: /tmp/apim_credentials.txt"
+# Save credentials for other scripts to use
+CREDS_FILE=".oauth_credentials"
+cat > "$CREDS_FILE" <<EOF
+# OAuth Credentials for AllServicesApp - DO NOT COMMIT TO GIT
+# Generated: $(date)
+CLIENT_ID=$CONSUMER_KEY
+CLIENT_SECRET=$CONSUMER_SECRET
+APP_ID=$APP_ID
+EOF
+
+log_success "Credentials saved to: $CREDS_FILE"
+echo ""

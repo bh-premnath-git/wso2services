@@ -1,0 +1,14 @@
+# OAuth Credentials - Generated at runtime
+.oauth_credentials
+
+# Temporary files
+*.tmp
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
