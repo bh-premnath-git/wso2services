@@ -95,6 +95,73 @@ testOnBorrow = true
 validationInterval = 30000
 defaultAutoCommit = false
 
+# ============================================
+# OIDC Scopes - Define which claims appear in JWT
+# ============================================
+
+# Phone scope - adds phone_number to JWT
+[[oauth.oidc.scope]]
+name = "phone"
+display_name = "Phone Number"
+description = "Access to user phone number"
+claims = [
+    "http://wso2.org/claims/mobile",
+    "http://wso2.org/claims/telephone"
+]
+
+# Address scope - adds address object to JWT
+[[oauth.oidc.scope]]
+name = "address"
+display_name = "Address Information"
+description = "Access to user address"
+claims = [
+    "http://wso2.org/claims/streetaddress",
+    "http://wso2.org/claims/locality",
+    "http://wso2.org/claims/region",
+    "http://wso2.org/claims/postalcode",
+    "http://wso2.org/claims/country"
+]
+
+# Email scope
+[[oauth.oidc.scope]]
+name = "email"
+display_name = "Email Address"
+description = "Access to user email"
+claims = [
+    "http://wso2.org/claims/emailaddress"
+]
+
+# Enhanced profile scope
+[[oauth.oidc.scope]]
+name = "profile"
+display_name = "User Profile"
+description = "Access to user profile"
+claims = [
+    "http://wso2.org/claims/givenname",
+    "http://wso2.org/claims/lastname",
+    "http://wso2.org/claims/fullname",
+    "http://wso2.org/claims/username"
+]
+
+# JWT Token Configuration
+[oauth.token_generation]
+include_username_in_access_token = true
+access_token_type = "self_contained"  # Generates JWT tokens
+
+[oauth.oidc.id_token]
+id_token_issuer = "https://localhost:9444/oauth2/token"
+id_token_expiration = 3600
+
+# Include user claims in ID token and UserInfo
+[oauth.oidc.user_info]
+enable_user_info_jwt_response = false
+
+# Claim configuration - ensure claims are included in tokens
+[oauth.oidc.claims]
+enable_claims_in_id_token = true
+enable_claims_in_access_token = true
+enable_claims_in_userinfo = true
+
 # Enable DCR (Dynamic Client Registration) endpoint
 # Required for OAuth application registration via API
 [[resource.access_control]]
