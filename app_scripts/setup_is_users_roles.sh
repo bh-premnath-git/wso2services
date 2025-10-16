@@ -48,6 +48,7 @@ MINT_TOKENS="${MINT_TOKENS:-true}"
 # ---------- Setup ----------
 auth_basic=(-u "${IS_ADMIN_USER}:${IS_ADMIN_PASS}")
 json_hdr=(-H "Content-Type: application/json")
+scim_groups="${IS_BASE}/scim2/Groups"
 scim_users="${IS_BASE}/scim2/Users"
 scim_roles="${IS_BASE}/scim2/Roles"
 
@@ -205,10 +206,12 @@ assign_role_to_user() {
   local user_id="$1"
   local role_id="$2"
   local role_name="$3"
+  local username="$4"
 
-  log_info "Assigning role '${role_name}' (${role_id}) to user (${user_id})..."
+  log_info "Assigning role '${role_name}' to user '${username}'..."
 
-  # PATCH the user to add the role using proper schema
+  # WSO2 IS 7.1+: PATCH the ROLE (not the user) to add users
+  # The user's groups/roles attribute is immutable/read-only
   local response http_code
   response=$(curl -sk -w "\nHTTP_CODE:%{http_code}" "${auth_basic[@]}" \
     -H "Content-Type: application/json" \
@@ -217,27 +220,27 @@ assign_role_to_user() {
       \"schemas\": [\"urn:ietf:params:scim:api:messages:2.0:PatchOp\"],
       \"Operations\": [{
         \"op\": \"add\",
-        \"path\": \"roles\",
+        \"path\": \"users\",
         \"value\": [{
-          \"value\": \"${role_id}\",
-          \"display\": \"${role_name}\"
+          \"value\": \"${user_id}\",
+          \"display\": \"${username}\"
         }]
       }]
     }" \
-    "${scim_users}/${user_id}" 2>/dev/null || echo "HTTP_CODE:000")
+    "${scim_roles}/${role_id}" 2>/dev/null || echo "HTTP_CODE:000")
 
   http_code=$(echo "$response" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
   response_body=$(echo "$response" | sed 's/HTTP_CODE:[0-9]*//')
 
   if [ "$http_code" = "200" ] || echo "$response_body" | jq -e '.id' >/dev/null 2>&1; then
-    log_success "role assigned (HTTP ${http_code})"
+    log_success "Role '${role_name}' assigned to '${username}' ✅"
     return 0
   else
-    log_warning "role assignment returned HTTP ${http_code}"
+    log_warning "Role assignment returned HTTP ${http_code}"
     if [ -n "$response_body" ]; then
       echo "$response_body" | jq -C '.detail // .scimType // .' 2>/dev/null || echo "$response_body"
     fi
-    # Don't fail on role assignment errors (some roles may have restrictions)
+    # Don't fail on role assignment errors
     return 0
   fi
 }
@@ -355,7 +358,7 @@ main() {
     role_id="${ROLE_IDS[$role]}"
 
     if [ -n "${user_id}" ] && [ -n "${role_id}" ]; then
-      assign_role_to_user "${user_id}" "${role_id}" "${role}" || true
+      assign_role_to_user "${user_id}" "${role_id}" "${role}" "${u}" || true
     else
       log_warning "Skipping ${u} - missing IDs (user:${user_id}, role:${role_id})"
     fi
