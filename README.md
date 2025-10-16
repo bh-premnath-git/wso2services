@@ -673,7 +673,28 @@ Services use environment variables for configuration (see `docker-compose.yml`):
 - ✅ API revisions deployed to gateway
 - ✅ 5 test users created (ops_user, finance, auditor, user, app_admin)
 
-**Setup Scripts:**
+**Quick Setup (Recommended):**
+```bash
+# Complete automated setup - Fresh installation
+# ⚠️  WARNING: This STOPS containers and REMOVES volumes (deletes all data)
+# 
+# What it does:
+# 1. Stops all containers and removes volumes
+# 2. Starts PostgreSQL + waits for health
+# 3. Starts infrastructure (Redis, DynamoDB, Redpanda, Jaeger, OTel)
+# 4. Starts WSO2 IS & AM + waits for health
+# 5. Starts all 6 microservices + waits for health
+# 6. Runs all setup scripts (SSL, KeyManager, Users, APIs)
+# 7. Tests complete integration
+#
+# Health Checks: Real Docker health checks (not fixed timings!)
+# Total time: 10-20 minutes (first run with all services)
+
+./complete_startup.sh
+```
+
+**Manual Setup (Step by Step):**
+```bash
 # 1. Database & Network (Prerequisites)
 ./app_scripts/fix_consent_tables.sh 
 ./app_scripts/fix_ssl_certificates.sh
@@ -692,8 +713,8 @@ Services use environment variables for configuration (see `docker-compose.yml`):
 ./app_scripts/test_wso2is_integration.sh
 
 # 6. (Optional) Create Dedicated Password Grant App
-# Only needed if you want a separate OAuth app for user authentication
 ./app_scripts/create_working_password_grant_app.sh
+```
 
 **Validation Scripts:**
 - `check_keymanager.sh` - Validate Key Manager configuration
