@@ -684,12 +684,16 @@ Services use environment variables for configuration (see `docker-compose.yml`):
 # 3. Users (BEFORE testing with password grant)
 ./app_scripts/setup_is_users_roles.sh
 
-# 4. APIs (Can be done anytime)
+# 4. APIs & Applications
 ./app_scripts/register_apis.sh
 ./app_scripts/deploy_apis_to_gateway.sh
 
 # 5. Test Everything
 ./app_scripts/test_wso2is_integration.sh
+
+# 6. (Optional) Create Dedicated Password Grant App
+# Only needed if you want a separate OAuth app for user authentication
+./app_scripts/create_working_password_grant_app.sh
 
 **Validation Scripts:**
 - `check_keymanager.sh` - Validate Key Manager configuration
