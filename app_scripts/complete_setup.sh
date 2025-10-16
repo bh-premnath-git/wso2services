@@ -51,6 +51,20 @@ fi
 log_success "All containers running"
 echo ""
 
+# Step 0: Fix missing consent management tables
+log_step "STEP 0/6: Checking consent management tables"
+
+if [ -f "app_scripts/fix_consent_tables.sh" ]; then
+  ./app_scripts/fix_consent_tables.sh
+  if [ $? -ne 0 ]; then
+    log_error "Failed to fix consent tables"
+    exit 1
+  fi
+else
+  log_error "fix_consent_tables.sh not found"
+  exit 1
+fi
+
 # Step 1: Setup WSO2 IS users and roles
 log_step "STEP 1/6: Setting up WSO2 IS users and roles"
 
@@ -107,14 +121,15 @@ else
   exit 1
 fi
 
-# Step 5: Register WSO2-IS-KeyManager
-log_step "STEP 5/6: Registering WSO2 IS as Key Manager"
+# Step 5: Setup WSO2-IS-KeyManager
+log_step "STEP 5/6: Setting up WSO2 IS as Key Manager"
 
-if [ -f "app_scripts/register_wso2is_keymanager.sh" ]; then
-  ./app_scripts/register_wso2is_keymanager.sh || true
+if [ -f "app_scripts/setup_wso2is_keymanager.sh" ]; then
+  # Run non-interactively by auto-confirming update
+  echo "y" | ./app_scripts/setup_wso2is_keymanager.sh || true
   # Don't exit on error, as it might already exist
 else
-  log_error "register_wso2is_keymanager.sh not found"
+  log_error "setup_wso2is_keymanager.sh not found"
   exit 1
 fi
 

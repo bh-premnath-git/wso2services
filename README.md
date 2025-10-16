@@ -674,12 +674,25 @@ Services use environment variables for configuration (see `docker-compose.yml`):
 - ✅ 5 test users created (ops_user, finance, auditor, user, app_admin)
 
 **Setup Scripts:**
-- `complete_setup.sh` - Full automated setup
-- `setup_is_users_roles.sh` - Create IS users
-- `fix_ssl_certificates.sh` - Configure SSL trust
-- `register_apis.sh` - Register APIs in AM
-- `deploy_apis_to_gateway.sh` - Deploy to gateway
-- `register_wso2is_keymanager.sh` - Register Key Manager
+# 1. Database & Network (Prerequisites)
+./app_scripts/fix_consent_tables.sh 
+./app_scripts/fix_ssl_certificates.sh
+
+# 2. Key Manager (BEFORE creating applications)
+./app_scripts/setup_wso2is_keymanager.sh
+
+# 3. Users (BEFORE testing with password grant)
+./app_scripts/setup_is_users_roles.sh
+
+# 4. APIs (Can be done anytime)
+./app_scripts/register_apis.sh
+./app_scripts/deploy_apis_to_gateway.sh
+
+# 5. Test Everything
+./app_scripts/test_wso2is_integration.sh
+
+**Validation Scripts:**
+- `check_keymanager.sh` - Validate Key Manager configuration
 - `test_wso2is_integration.sh` - Test complete flow
 
 **Documentation:**
