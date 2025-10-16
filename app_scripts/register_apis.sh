@@ -273,7 +273,7 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ -z "$CONSUMER_KEY" ]; do
       "validityTime": 3600,
       "scopes": ["default"]
     }' \
-    "${APIM_BASE}/api/am/devportal/v3/applications/${APP_ID}/keys/PRODUCTION/generate" 2>/dev/null)
+    "${APIM_BASE}/api/am/devportal/v3/applications/${APP_ID}/generate-keys" 2>/dev/null)
 
   CONSUMER_KEY=$(echo "$KEYS_RESPONSE" | jq -r '.consumerKey // empty')
   CONSUMER_SECRET=$(echo "$KEYS_RESPONSE" | jq -r '.consumerSecret // empty')

@@ -73,8 +73,39 @@ fi
 log_success "Test application created: $APP_ID"
 echo ""
 
-# Step 2: Generate keys with WSO2-IS-KeyManager
-log_info "[2/5] Generating keys with WSO2-IS-KeyManager..."
+# Step 2: Subscribe to APIs FIRST (before generating keys)
+log_info "[2/5] Subscribing to APIs..."
+
+# Get all APIs
+ALL_APIS=$(curl -sk -u "admin:admin" \
+    "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/apis?limit=100")
+
+SUBSCRIPTION_COUNT=0
+
+for api in "${APIS[@]}"; do
+    FOUND_API_ID=$(echo "$ALL_APIS" | jq -r ".list[] | select(.name | ascii_downcase | contains(\"${api}\")) | .id")
+    
+    if [ -n "$FOUND_API_ID" ] && [ "$FOUND_API_ID" != "null" ]; then
+        SUB_RESPONSE=$(curl -sk -u "admin:admin" \
+            -X POST "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"apiId\": \"${FOUND_API_ID}\",
+                \"applicationId\": \"${APP_ID}\",
+                \"throttlingPolicy\": \"Unlimited\"
+            }" 2>/dev/null)
+        
+        if echo "$SUB_RESPONSE" | jq -e '.subscriptionId' >/dev/null 2>&1; then
+            SUBSCRIPTION_COUNT=$((SUBSCRIPTION_COUNT + 1))
+        fi
+    fi
+done
+
+log_success "Subscribed to $SUBSCRIPTION_COUNT APIs"
+echo ""
+
+# Step 3: Generate keys with WSO2-IS-KeyManager
+log_info "[3/5] Generating keys with WSO2-IS-KeyManager..."
 
 KEYS_RESPONSE=$(curl -sk -u "admin:admin" \
     -X POST "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/applications/${APP_ID}/generate-keys" \
@@ -101,8 +132,8 @@ log_success "Keys generated successfully"
 log_info "Client ID: $CLIENT_ID"
 echo ""
 
-# Step 3: Get token from WSO2 IS for ops_user
-log_info "[3/5] Getting token from WSO2 IS for ops_user..."
+# Step 4: Get token from WSO2 IS (after subscriptions and key generation)
+log_info "[4/5] Getting token from WSO2 IS for ops_user..."
 
 TOKEN_RESPONSE=$(curl -sk -u "${CLIENT_ID}:${CLIENT_SECRET}" \
     -X POST "https://${IS_HOST}:${IS_PORT}/oauth2/token" \
@@ -124,37 +155,6 @@ fi
 
 log_success "Token obtained from WSO2 IS"
 echo "Token: ${ACCESS_TOKEN:0:50}..."
-echo ""
-
-# Step 4: Subscribe to APIs
-log_info "[4/5] Subscribing test application to APIs..."
-
-# Get all APIs
-ALL_APIS=$(curl -sk -u "admin:admin" \
-    "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/apis?limit=100")
-
-SUBSCRIPTION_COUNT=0
-
-for api in "${APIS[@]}"; do
-    API_ID=$(echo "$ALL_APIS" | jq -r ".list[] | select(.name | ascii_downcase | contains(\"${api}\")) | .id")
-    
-    if [ -n "$API_ID" ] && [ "$API_ID" != "null" ]; then
-        SUB_RESPONSE=$(curl -sk -u "admin:admin" \
-            -X POST "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions" \
-            -H "Content-Type: application/json" \
-            -d "{
-                \"apiId\": \"${API_ID}\",
-                \"applicationId\": \"${APP_ID}\",
-                \"throttlingPolicy\": \"Unlimited\"
-            }" 2>/dev/null)
-        
-        if echo "$SUB_RESPONSE" | jq -e '.subscriptionId' >/dev/null 2>&1; then
-            SUBSCRIPTION_COUNT=$((SUBSCRIPTION_COUNT + 1))
-        fi
-    fi
-done
-
-log_success "Subscribed to $SUBSCRIPTION_COUNT APIs"
 echo ""
 
 # Step 5: Test API calls through gateway
