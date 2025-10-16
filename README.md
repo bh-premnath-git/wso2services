@@ -1,12 +1,5 @@
 # Payment Platform
 
-A complete Docker-based setup for **WSO2 API Manager 4.5.0** and **WSO2 Identity Server 7.1.0**, fully integrated with **PostgreSQL 18.0**.
-
-> **Status:** ✅ **WSO2 IS + AM Integration WORKING** - Users authenticate with WSO2 IS and access APIs through WSO2 AM Gateway  
-> See **[FINAL_SOLUTION.md](FINAL_SOLUTION.md)** for complete integration guide
-
-> **Environment:** Local development / evaluation. Harden before Internet exposure.
-
 ## 📋 Table of Contents
 
 - [Overview](#overview)

@@ -204,11 +204,28 @@ echo ""
 wait_for_service_url "WSO2 AM Carbon Console" "https://localhost:9443/carbon/admin/login.jsp" || exit 1
 echo ""
 
+# Critical: Wait for WSO2 IS APIs to be fully functional
+log_info "Waiting for WSO2 IS APIs to be fully ready..."
 wait_for_service_url "WSO2 IS SCIM2 API" "https://localhost:9444/scim2/Users" || exit 1
 echo ""
 
-wait_for_service_url "WSO2 AM REST API" "https://localhost:9443/api/am/devportal/v3/apis" || exit 1
+wait_for_service_url "WSO2 IS DCR API" "https://localhost:9444/api/identity/oauth2/dcr/v1.1/applications" || exit 1
 echo ""
+
+# Critical: Wait for WSO2 AM REST APIs to be fully functional
+log_info "Waiting for WSO2 AM REST APIs to be fully ready..."
+wait_for_service_url "WSO2 AM Publisher API" "https://localhost:9443/api/am/publisher/v4/apis" || exit 1
+echo ""
+
+wait_for_service_url "WSO2 AM DevPortal API" "https://localhost:9443/api/am/devportal/v3/apis" || exit 1
+echo ""
+
+wait_for_service_url "WSO2 AM Admin API" "https://localhost:9443/api/am/admin/v4/key-managers" || exit 1
+echo ""
+
+# Extra wait for WSO2 services to be fully stable
+log_info "Waiting additional 30 seconds for WSO2 services to stabilize..."
+sleep 30
 
 log_success "All services are ready and responding!"
 echo ""
@@ -245,8 +262,44 @@ fi
 log_step "STEP 5/9: Setting up WSO2 IS as Key Manager"
 
 if [ -f "app_scripts/setup_wso2is_keymanager.sh" ]; then
-    # Auto-confirm if key manager exists
-    echo "y" | ./app_scripts/setup_wso2is_keymanager.sh || true
+    # Auto-confirm if key manager exists (but CATCH FAILURES!)
+    if ! echo "y" | ./app_scripts/setup_wso2is_keymanager.sh; then
+        log_error "Key Manager setup failed!"
+        exit 1
+    fi
+    
+    # Wait for Key Manager to be fully synced and ready
+    log_info "Waiting 30 seconds for Key Manager to sync with APIM..."
+    sleep 30
+    
+    # Verify Key Manager is properly configured with endpoints
+    log_info "Verifying Key Manager configuration..."
+    
+    KM_ID=$(curl -sk -u "admin:admin" \
+        "https://localhost:9443/api/am/admin/v4/key-managers" 2>/dev/null | \
+        jq -r '.list[] | select(.name=="WSO2-IS-KeyManager") | .id' || echo "")
+    
+    if [ -z "$KM_ID" ]; then
+        log_error "WSO2-IS-KeyManager not found!"
+        exit 1
+    fi
+    
+    # Verify endpoints are configured (not null)
+    TOKEN_EP=$(curl -sk -u "admin:admin" \
+        "https://localhost:9443/api/am/admin/v4/key-managers/${KM_ID}" 2>/dev/null | \
+        jq -r '.tokenEndpoint // empty')
+    
+    if [ -z "$TOKEN_EP" ] || [ "$TOKEN_EP" = "null" ]; then
+        log_error "Key Manager endpoints not configured properly!"
+        log_error "Token endpoint is: $TOKEN_EP"
+        echo ""
+        echo "Run manually to debug:"
+        echo "  ./app_scripts/setup_wso2is_keymanager.sh"
+        exit 1
+    fi
+    
+    log_success "Key Manager is properly configured"
+    log_info "Token endpoint: $TOKEN_EP"
 else
     log_error "setup_wso2is_keymanager.sh not found"
     exit 1

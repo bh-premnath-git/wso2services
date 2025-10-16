@@ -233,27 +233,68 @@ done
 
 echo ""
 
+# First verify Key Manager is available and configured
+log_info "Verifying WSO2-IS-KeyManager is available..."
+KM_LIST=$(curl -sk -H "$AUTH_HEADER" \
+  "${APIM_BASE}/api/am/admin/v4/key-managers" 2>/dev/null)
+
+KM_EXISTS=$(echo "$KM_LIST" | jq -r '.list[] | select(.name=="WSO2-IS-KeyManager") | .name' || echo "")
+
+if [ "$KM_EXISTS" != "WSO2-IS-KeyManager" ]; then
+  log_error "WSO2-IS-KeyManager not found in APIM"
+  echo "Available Key Managers:"
+  echo "$KM_LIST" | jq -r '.list[].name'
+  exit 1
+fi
+
+log_success "WSO2-IS-KeyManager is registered"
+
 # Generate keys using WSO2 IS Key Manager
 log_info "Generating OAuth keys with WSO2 IS Key Manager..."
 
-KEYS_RESPONSE=$(curl -sk -X POST \
-  -H "$AUTH_HEADER" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "keyType": "PRODUCTION",
-    "keyManager": "WSO2-IS-KeyManager",
-    "grantTypesToBeSupported": ["client_credentials", "password"],
-    "validityTime": 3600,
-    "scopes": ["default"]
-  }' \
-  "${APIM_BASE}/api/am/devportal/v3/applications/${APP_ID}/keys/PRODUCTION/generate" 2>/dev/null)
+# Retry logic for key generation (Key Manager might need a moment to sync)
+MAX_RETRIES=3
+RETRY_COUNT=0
+CONSUMER_KEY=""
 
-CONSUMER_KEY=$(echo "$KEYS_RESPONSE" | jq -r '.consumerKey // empty')
-CONSUMER_SECRET=$(echo "$KEYS_RESPONSE" | jq -r '.consumerSecret // empty')
+while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ -z "$CONSUMER_KEY" ]; do
+  if [ $RETRY_COUNT -gt 0 ]; then
+    log_warning "Retry attempt $RETRY_COUNT/$MAX_RETRIES after 10 seconds..."
+    sleep 10
+  fi
+  
+  KEYS_RESPONSE=$(curl -sk -X POST \
+    -H "$AUTH_HEADER" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "keyType": "PRODUCTION",
+      "keyManager": "WSO2-IS-KeyManager",
+      "grantTypesToBeSupported": ["client_credentials", "password"],
+      "validityTime": 3600,
+      "scopes": ["default"]
+    }' \
+    "${APIM_BASE}/api/am/devportal/v3/applications/${APP_ID}/keys/PRODUCTION/generate" 2>/dev/null)
+
+  CONSUMER_KEY=$(echo "$KEYS_RESPONSE" | jq -r '.consumerKey // empty')
+  CONSUMER_SECRET=$(echo "$KEYS_RESPONSE" | jq -r '.consumerSecret // empty')
+  
+  RETRY_COUNT=$((RETRY_COUNT + 1))
+done
 
 if [ -z "$CONSUMER_KEY" ]; then
-  log_error "Failed to generate keys"
+  log_error "Failed to generate keys after $MAX_RETRIES attempts"
+  echo ""
+  echo "Response from APIM:"
   echo "$KEYS_RESPONSE" | jq '.'
+  echo ""
+  log_error "Possible causes:"
+  echo "  1. WSO2-IS-KeyManager not fully synced (wait longer)"
+  echo "  2. Key Manager endpoint not reachable from APIM"
+  echo "  3. SSL certificate issues between APIM and IS"
+  echo ""
+  echo "Check WSO2 AM logs:"
+  echo "  docker compose logs wso2am | tail -50"
+  echo ""
   exit 1
 fi
 
