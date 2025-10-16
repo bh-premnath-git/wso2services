@@ -39,7 +39,7 @@ IS_PORT="9444"
 GATEWAY_URL="https://localhost:8243"
 TEST_APP_NAME="IntegrationTestApp_$$"
 
-# APIs to test
+# APIs to test (URL paths)
 declare -a APIS=(
     "forex"
     "profile"
@@ -47,6 +47,16 @@ declare -a APIS=(
     "payment"
     "ledger"
     "rules"
+)
+
+# API name patterns for subscription matching
+declare -A API_PATTERNS=(
+    ["forex"]="forex"
+    ["profile"]="profile"
+    ["wallet"]="wallet"
+    ["payment"]="payment"
+    ["ledger"]="ledger"
+    ["rules"]="rule-engine"
 )
 
 # Step 1: Create test application
@@ -83,7 +93,9 @@ ALL_APIS=$(curl -sk -u "admin:admin" \
 SUBSCRIPTION_COUNT=0
 
 for api in "${APIS[@]}"; do
-    FOUND_API_ID=$(echo "$ALL_APIS" | jq -r ".list[] | select(.name | ascii_downcase | contains(\"${api}\")) | .id")
+    # Use pattern mapping for subscription search
+    SEARCH_PATTERN="${API_PATTERNS[$api]}"
+    FOUND_API_ID=$(echo "$ALL_APIS" | jq -r ".list[] | select(.name | ascii_downcase | contains(\"${SEARCH_PATTERN}\")) | .id")
     
     if [ -n "$FOUND_API_ID" ] && [ "$FOUND_API_ID" != "null" ]; then
         SUB_RESPONSE=$(curl -sk -u "admin:admin" \
