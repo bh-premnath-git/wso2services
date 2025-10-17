@@ -209,13 +209,71 @@ Before porting to another system:
 
 ---
 
+## 🔐 OAuth & Authentication (Latest Updates)
+
+### What's Portable
+
+All OAuth and authentication configuration is now **fully portable**:
+
+1. **WSO2 IS Configuration**
+   - `wso2is/conf/deployment.toml` - Password grant enabled
+   - Token type configured correctly
+   - Copied into Docker container during build
+
+2. **Auth Module Code**
+   - `app_services/common/auth/` - Complete auth module
+   - Registration, Login, Password Reset endpoints
+   - Automatically available in profile service
+
+3. **Setup Scripts**
+   - `app_scripts/register_test_users.sh` - Creates users via API
+   - `app_scripts/reset_test_user_passwords.sh` - Ensures passwords work
+   - Integrated into `complete_startup.sh` (Steps 9-10)
+
+### What's Generated Fresh (Not in Git)
+
+These files are created automatically on each system:
+
+- `.oauth_credentials` - OAuth client ID/secret (gitignored)
+- Test users in WSO2 IS database (created by scripts)
+- OAuth applications (created by DCR)
+
+### Complete Authentication Flow on New System
+
+When you run `complete_startup.sh` on a new system:
+
+1. ✅ Docker builds containers with `deployment.toml`
+2. ✅ WSO2 IS starts with password grant enabled
+3. ✅ Scripts create OAuth application via DCR
+4. ✅ Users registered via `/register` endpoint
+5. ✅ Passwords reset/activated for OAuth
+6. ✅ Everything works immediately!
+
+**Test it:**
+```bash
+# After complete_startup.sh finishes
+source .oauth_credentials
+
+curl -X POST http://localhost:8004/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"username\": \"ops_user\",
+    \"password\": \"OpsUser123@\",
+    \"client_id\": \"${CLIENT_ID}\",
+    \"client_secret\": \"${CLIENT_SECRET}\",
+    \"scopes\": [\"openid\", \"profile\", \"email\"]
+  }"
+```
+
+---
+
 ## 📝 Summary
 
 **To port to another system:**
 
-1. ✅ Copy directory
+1. ✅ Copy directory (or git clone)
 2. ✅ Run `./complete_startup.sh`
-3. ✅ Done!
+3. ✅ Done! Authentication, OAuth, APIs all working!
 
 **No configuration changes needed for standard deployments!**
 
