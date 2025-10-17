@@ -13,6 +13,7 @@ else:
     # Fallback for Docker container where common is at /app/common
     sys.path.insert(0, '/app/common')
 
+from middleware import add_cors_middleware
 from auth.wso2_client import WSO2IdentityClient, WSO2ClientError
 from auth.models import (
     UserRegistrationRequest,
@@ -30,6 +31,8 @@ app = FastAPI(
     version="1.0.0",
     description="User profile, registration, and authentication service"
 )
+
+add_cors_middleware(app)
 
 # Initialize WSO2 client
 wso2_client = WSO2IdentityClient(

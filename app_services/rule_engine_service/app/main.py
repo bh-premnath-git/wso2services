@@ -1,12 +1,25 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Dict, Any
+import os
+import sys
+
+# Add common module to path
+common_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'common'))
+if os.path.exists(common_path):
+    sys.path.insert(0, common_path)
+else:
+    sys.path.insert(0, '/app/common')
+
+from middleware import add_cors_middleware
 
 app = FastAPI(
     title="Rule Engine Service",
     version="1.0.0",
     description="Business rules and compliance engine"
 )
+
+add_cors_middleware(app)
 
 
 class RuleRequest(BaseModel):

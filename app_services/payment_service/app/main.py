@@ -2,12 +2,25 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
+import os
+import sys
+
+# Add common module to path
+common_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'common'))
+if os.path.exists(common_path):
+    sys.path.insert(0, common_path)
+else:
+    sys.path.insert(0, '/app/common')
+
+from middleware import add_cors_middleware
 
 app = FastAPI(
     title="Payment Service",
     version="1.0.0",
     description="Payment processing and orchestration service"
 )
+
+add_cors_middleware(app)
 
 
 class PaymentRequest(BaseModel):
