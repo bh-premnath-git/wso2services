@@ -74,6 +74,7 @@ class WSO2IdentityClient:
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
             "userName": user.username,
             "password": user.password,
+            "active": True,  # CRITICAL: Activate user immediately for OAuth password grant
             "name": {
                 "givenName": user.first_name,
                 "familyName": user.last_name,
