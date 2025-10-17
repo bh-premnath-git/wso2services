@@ -94,6 +94,20 @@ for username in "${!TEST_USERS[@]}"; do
         user_id=$(echo "$response_body" | jq -r '.user_id // empty' 2>/dev/null)
         if [ -n "$user_id" ]; then
             log_success "Registered: ${username} (ID: ${user_id:0:20}...)"
+            
+            # Activate user (users are created inactive by default)
+            curl -sk -u "admin:admin" \
+                -X PATCH "https://localhost:9444/scim2/Users/${user_id}" \
+                -H "Content-Type: application/json" \
+                -d '{
+                    "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                    "Operations": [{
+                        "op": "replace",
+                        "value": {"active": true}
+                    }]
+                }' >/dev/null 2>&1
+            
+            log_success "Activated: ${username}"
             REGISTERED=$((REGISTERED + 1))
         else
             log_error "Registration response invalid for ${username}"
