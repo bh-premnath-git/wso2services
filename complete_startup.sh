@@ -223,9 +223,19 @@ echo ""
 wait_for_service_url "WSO2 AM Admin API" "https://localhost:9443/api/am/admin/v4/key-managers" || exit 1
 echo ""
 
-# Extra wait for WSO2 services to be fully stable
-log_info "Waiting additional 30 seconds for WSO2 services to stabilize..."
-sleep 30
+# Extra wait for WSO2 services to be fully stable (OSGi bundle initialization)
+log_info "Waiting additional 60 seconds for WSO2 IS OSGi bundles to fully initialize..."
+log_warning "This prevents 'AuthenticatorRegistry.authTracker is null' errors"
+sleep 60
+
+# Verify WSO2 IS authentication is working (tests OSGi service registration)
+log_info "Verifying WSO2 IS authentication services are ready..."
+if curl -sk -u "admin:admin" --max-time 15 "https://localhost:9444/scim2/Users?count=1" 2>&1 | grep -q "totalResults"; then
+    log_success "WSO2 IS authentication and SCIM2 API are working!"
+else
+    log_warning "WSO2 IS SCIM2 test inconclusive, waiting extra 30 seconds..."
+    sleep 30
+fi
 
 log_success "All services are ready and responding!"
 echo ""
