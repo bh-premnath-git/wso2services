@@ -312,3 +312,38 @@ Check these in order:
    ```
 
 Most issues are resolved by simply running `./complete_startup.sh` which does a clean setup.
+
+
+echo "=== Using working password grant app creation ==="
+./app_scripts/create_working_password_grant_app.sh
+
+echo ""
+echo "=== Now running user registration ==="
+./app_scripts/register_test_users.sh
+
+cat /tmp/password_grant_app_credentials.txt | grep "Client" | head -2
+
+
+echo "=== Resetting password to use @ instead of ! ==="
+curl -s -X POST http://localhost:8004/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"username":"ops_user","new_password":"OpsUser123@"}' | python3 -m json.tool
+
+echo ""
+echo "=== Now testing login ==="
+CLIENT_ID="fA9IySxx5KScnzha6Ax5XUUZWvAa"
+CLIENT_SECRET="qRB43xo5vNgzN07xmYZKKOVlTY8xxMInfLKhOtuVb3Ea"
+
+curl -s -X POST http://localhost:8004/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "ops_user",
+    "password": "OpsUser123@",
+    "client_id": "'${CLIENT_ID}'",
+    "client_secret": "'${CLIENT_SECRET}'",
+    "scopes": ["openid", "profile", "email"]
+  }' | python3 -m json.tool | head -25
+
+
+  chmod +x app_scripts/configure_oauth_claims.sh && \
+./app_scripts/configure_oauth_claims.sh

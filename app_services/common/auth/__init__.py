@@ -1,6 +1,7 @@
 """
 Common auth module for WSO2 IS integration
 """
+from .wso2_client import WSO2IdentityClient, WSO2ClientError
 from .models import (
     UserRegistrationRequest,
     UserRegistrationResponse,
@@ -8,7 +9,9 @@ from .models import (
     TokenResponse,
     AddressInfo,
     PasswordResetRequest,
-    PasswordResetResponse
+    PasswordResetResponse,
+    UserProfileUpdateRequest,
+    UserProfileUpdateResponse
 )
 
 __all__ = [
@@ -19,6 +22,8 @@ __all__ = [
     "AddressInfo",
     "PasswordResetRequest",
     "PasswordResetResponse",
+    "UserProfileUpdateRequest",
+    "UserProfileUpdateResponse",
     "WSO2IdentityClient",
     "WSO2ClientError"
 ]

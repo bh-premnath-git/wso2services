@@ -20,7 +20,9 @@ from auth.models import (
     TokenRequest,
     TokenResponse,
     PasswordResetRequest,
-    PasswordResetResponse
+    PasswordResetResponse,
+    UserProfileUpdateRequest,
+    UserProfileUpdateResponse
 )
 
 app = FastAPI(
@@ -91,32 +93,59 @@ async def login(token_request: TokenRequest):
     """
     Authenticate user and get JWT tokens with claims.
     
-    **Scopes control which claims appear in JWT:**
-    - `openid`: Required for OIDC
-    - `profile`: Adds given_name, family_name, email
-    - `email`: Adds email
-    - `phone`: Adds phone_number (if user has phone)
-    - `address`: Adds address object (if user has address)
-    
-    **Example request:**
+    **Request body:**
     ```json
     {
       "username": "johndoe",
       "password": "SecurePass123!",
-      "client_id": "YOUR_CLIENT_ID",
-      "client_secret": "YOUR_CLIENT_SECRET",
-      "scopes": ["openid", "profile", "phone", "address"]
+      "client_id": "your_client_id",
+      "client_secret": "your_client_secret",
+      "scopes": ["openid", "profile", "email"]
     }
     ```
     
-    **Response includes decoded JWT claims showing:**
-    - User identity (sub, email)
-    - Profile info (given_name, family_name)
-    - Phone number (if phone scope requested and user has phone)
-    - Address object (if address scope requested and user has address)
+    **Scopes:**
+    - `openid` - Required for OIDC
+    - `profile` - Get name, username
+    - `email` - Get email address
+    - `phone` - Get phone number (if provided during registration)
+    - `address` - Get address details (if provided during registration)
+    
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8004/auth/login \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "username": "johndoe",
+        "password": "SecurePass123!",
+        "client_id": "your_client_id",
+        "client_secret": "your_client_secret",
+        "scopes": ["openid", "profile", "email", "phone", "address"]
+      }'
+    ```
+    
+    **Returns:**
+    - `access_token` - Use this to call protected APIs
+    - `id_token` - Contains user identity claims (JWT)
+    - `refresh_token` - Use to get new access tokens
+    - `decoded_claims` - Enhanced with full user info from SCIM
+    
+    **Note:** ID tokens from DCR apps have limited claims. Full user info
+    is retrieved from SCIM and included in `decoded_claims`.
     """
     try:
-        return await wso2_client.authenticate(token_request)
+        token_response = await wso2_client.authenticate(token_request)
+        
+        # Enhance decoded_claims with full user info from SCIM
+        if token_response.access_token:
+            try:
+                userinfo = await wso2_client.get_userinfo(token_response.access_token)
+                if token_response.decoded_claims:
+                    token_response.decoded_claims["userinfo"] = userinfo
+            except:
+                pass  # If userinfo fails, still return the tokens
+        
+        return token_response
     except WSO2ClientError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 
@@ -124,13 +153,85 @@ async def login(token_request: TokenRequest):
 @app.get("/auth/userinfo")
 async def get_userinfo(access_token: str):
     """
-    Get user info using access token.
-    Returns claims based on scopes used during authentication.
+    Get user info using access token from OAuth2 /userinfo endpoint.
+    
+    **Note:** Due to WSO2 IS DCR limitations, this only returns 'sub' claim.
+    Use `/auth/profile/{username}` for full user data.
     """
     try:
         return await wso2_client.get_userinfo(access_token)
     except WSO2ClientError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+@app.get("/auth/profile/{username}")
+async def get_user_profile(username: str):
+    """
+    Get full user profile from SCIM2 API.
+    
+    **Returns complete user information:**
+    - username
+    - email
+    - given_name (first name)
+    - family_name (last name) 
+    - full_name
+    - phone (if available)
+    - address (if available)
+    - active status
+    - roles
+    
+    **Example:**
+    ```bash
+    curl http://localhost:8004/auth/profile/ops_user
+    ```
+    
+    This is the recommended way to get full user data when using
+    OAuth apps created via DCR (Dynamic Client Registration).
+    """
+    import httpx
+    
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            # Query SCIM for user
+            response = await client.get(
+                f"https://wso2is:9443/scim2/Users",
+                params={"filter": f"userName eq {username}"},
+                headers={
+                    "Authorization": wso2_client.auth_header,
+                    "Accept": "application/scim+json"
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("totalResults", 0) > 0:
+                    user = data["Resources"][0]
+                    
+                    # Extract user profile
+                    emails = user.get("emails", [])
+                    phone_numbers = user.get("phoneNumbers", [])
+                    
+                    profile = {
+                        "username": user.get("userName"),
+                        "id": user.get("id"),
+                        "active": user.get("active", False),
+                        "email": emails[0] if emails else None,
+                        "given_name": user.get("name", {}).get("givenName"),
+                        "family_name": user.get("name", {}).get("familyName"),
+                        "full_name": user.get("name", {}).get("formatted"),
+                        "phone": phone_numbers[0] if phone_numbers else None,
+                        "roles": [r.get("display") for r in user.get("roles", [])],
+                    }
+                    
+                    return profile
+                else:
+                    raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+            else:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch user profile")
+                
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Failed to connect to WSO2 IS: {str(e)}")
 
 
 @app.post("/auth/refresh")
@@ -177,6 +278,73 @@ async def reset_password(reset_request: PasswordResetRequest):
     """
     try:
         return await wso2_client.reset_password(reset_request)
+    except WSO2ClientError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+@app.patch("/auth/profile/{username}", response_model=UserProfileUpdateResponse)
+async def update_user_profile(username: str, update_request: UserProfileUpdateRequest):
+    """
+    Update user profile information.
+    
+    **All fields are optional** - only provide fields you want to update.
+    
+    **Request body:**
+    ```json
+    {
+      "email": "newemail@example.com",
+      "first_name": "John",
+      "last_name": "Doe",
+      "phone": "+12025551234",
+      "address": {
+        "street": "123 Main St",
+        "locality": "Springfield",
+        "region": "IL",
+        "postal_code": "62701",
+        "country": "USA"
+      }
+    }
+    ```
+    
+    **Example - Update only phone:**
+    ```bash
+    curl -X PATCH http://localhost:8004/auth/profile/ops_user \\
+      -H "Content-Type: application/json" \\
+      -d '{"phone": "+12025551234"}'
+    ```
+    
+    **Example - Update name and email:**
+    ```bash
+    curl -X PATCH http://localhost:8004/auth/profile/ops_user \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "first_name": "John",
+        "last_name": "Smith",
+        "email": "john.smith@example.com"
+      }'
+    ```
+    
+    **Example - Update address:**
+    ```bash
+    curl -X PATCH http://localhost:8004/auth/profile/ops_user \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "address": {
+          "street": "456 Oak Ave",
+          "locality": "Chicago",
+          "region": "IL",
+          "postal_code": "60601",
+          "country": "USA"
+        }
+      }'
+    ```
+    
+    **Returns:**
+    - Status and message
+    - List of fields that were updated
+    """
+    try:
+        return await wso2_client.update_profile(username, update_request)
     except WSO2ClientError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 

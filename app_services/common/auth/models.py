@@ -144,3 +144,35 @@ class PasswordResetResponse(BaseModel):
     status: str
     message: str
     username: str
+
+
+class UserProfileUpdateRequest(BaseModel):
+    """Update user profile - all fields optional"""
+    email: Optional[EmailStr] = None
+    first_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    phone: Optional[str] = Field(
+        None,
+        description="Phone number in E.164 format (+1234567890)"
+    )
+    address: Optional[AddressInfo] = Field(
+        None,
+        description="User address - all subfields optional"
+    )
+    
+    @validator('phone')
+    def validate_phone_format(cls, v):
+        """Validate E.164 phone format"""
+        if v and not re.match(r'^\+[1-9]\d{1,14}$', v):
+            raise ValueError(
+                "Phone must be in E.164 format: +[country][number] (e.g., +12025551234)"
+            )
+        return v
+
+
+class UserProfileUpdateResponse(BaseModel):
+    """Response after profile update"""
+    status: str
+    message: str
+    username: str
+    updated_fields: list

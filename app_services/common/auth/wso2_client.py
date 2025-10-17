@@ -12,7 +12,9 @@ from .models import (
     TokenRequest,
     TokenResponse,
     PasswordResetRequest,
-    PasswordResetResponse
+    PasswordResetResponse,
+    UserProfileUpdateRequest,
+    UserProfileUpdateResponse
 )
 
 
@@ -384,6 +386,140 @@ class WSO2IdentityClient:
                         status="success",
                         message="Password reset successfully",
                         username=reset_request.username
+                    )
+                else:
+                    error_data = patch_response.json() if "application/json" in patch_response.headers.get("content-type", "") else patch_response.text
+                    raise WSO2ClientError(patch_response.status_code, error_data)
+            
+            except httpx.RequestError as e:
+                raise WSO2ClientError(503, f"Failed to connect to WSO2 IS: {str(e)}")
+    
+    async def update_profile(
+        self,
+        username: str,
+        update_request: UserProfileUpdateRequest
+    ) -> UserProfileUpdateResponse:
+        """
+        Update user profile via SCIM2 API.
+        
+        Args:
+            username: Username to update
+            update_request: Fields to update (all optional)
+            
+        Returns:
+            UserProfileUpdateResponse with updated fields
+            
+        Raises:
+            WSO2ClientError: If update fails
+        """
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            try:
+                # First, get user ID by username
+                response = await client.get(
+                    f"{self.base_url}/scim2/Users",
+                    params={"filter": f"userName eq {username}"},
+                    headers={
+                        "Authorization": self.auth_header,
+                        "Accept": "application/scim+json"
+                    },
+                    timeout=30.0
+                )
+                
+                if response.status_code != 200:
+                    raise WSO2ClientError(response.status_code, "Failed to find user")
+                
+                users = response.json().get("Resources", [])
+                if not users:
+                    raise WSO2ClientError(404, f"User '{username}' not found")
+                
+                user_id = users[0].get("id")
+                
+                # Build PATCH operations for provided fields
+                operations = []
+                updated_fields = []
+                
+                if update_request.email is not None:
+                    operations.append({
+                        "op": "replace",
+                        "path": "emails",
+                        "value": [update_request.email]
+                    })
+                    updated_fields.append("email")
+                
+                if update_request.first_name is not None or update_request.last_name is not None:
+                    name_value = {}
+                    if update_request.first_name is not None:
+                        name_value["givenName"] = update_request.first_name
+                        updated_fields.append("first_name")
+                    if update_request.last_name is not None:
+                        name_value["familyName"] = update_request.last_name
+                        updated_fields.append("last_name")
+                    
+                    operations.append({
+                        "op": "replace",
+                        "path": "name",
+                        "value": name_value
+                    })
+                
+                if update_request.phone is not None:
+                    operations.append({
+                        "op": "replace",
+                        "path": "phoneNumbers",
+                        "value": [update_request.phone]
+                    })
+                    updated_fields.append("phone")
+                
+                if update_request.address is not None:
+                    address_value = {
+                        "formatted": update_request.address.to_formatted()
+                    }
+                    if update_request.address.street:
+                        address_value["streetAddress"] = update_request.address.street
+                    if update_request.address.locality:
+                        address_value["locality"] = update_request.address.locality
+                    if update_request.address.region:
+                        address_value["region"] = update_request.address.region
+                    if update_request.address.postal_code:
+                        address_value["postalCode"] = update_request.address.postal_code
+                    if update_request.address.country:
+                        address_value["country"] = update_request.address.country
+                    
+                    operations.append({
+                        "op": "replace",
+                        "path": "addresses",
+                        "value": [address_value]
+                    })
+                    updated_fields.append("address")
+                
+                if not operations:
+                    return UserProfileUpdateResponse(
+                        status="success",
+                        message="No fields to update",
+                        username=username,
+                        updated_fields=[]
+                    )
+                
+                # Update via SCIM2 PATCH
+                patch_response = await client.patch(
+                    f"{self.base_url}/scim2/Users/{user_id}",
+                    json={
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": operations
+                    },
+                    headers={
+                        "Authorization": self.auth_header,
+                        "Content-Type": "application/scim+json",
+                        "Accept": "application/scim+json"
+                    },
+                    timeout=30.0
+                )
+                
+                if patch_response.status_code == 200:
+                    return UserProfileUpdateResponse(
+                        status="success",
+                        message="Profile updated successfully",
+                        username=username,
+                        updated_fields=updated_fields
                     )
                 else:
                     error_data = patch_response.json() if "application/json" in patch_response.headers.get("content-type", "") else patch_response.text
