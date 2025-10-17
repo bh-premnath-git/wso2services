@@ -182,6 +182,59 @@ async def root():
     }
 
 
+@app.get("/auth/credentials")
+async def get_oauth_credentials():
+    """
+    Get OAuth2 client credentials for frontend applications.
+    
+    Returns CLIENT_ID and CLIENT_SECRET needed for login/registration.
+    These credentials are stored in .oauth_credentials file.
+    """
+    credentials_file = os.getenv("OAUTH_CREDENTIALS_FILE", "/app/.oauth_credentials")
+    
+    # Try multiple possible locations
+    possible_locations = [
+        credentials_file,
+        "/app/.oauth_credentials",
+        "/.oauth_credentials",
+        ".oauth_credentials"
+    ]
+    
+    for filepath in possible_locations:
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'r') as f:
+                    client_id = None
+                    client_secret = None
+                    app_id = None
+                    
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('CLIENT_ID='):
+                            client_id = line.split('=', 1)[1]
+                        elif line.startswith('CLIENT_SECRET='):
+                            client_secret = line.split('=', 1)[1]
+                        elif line.startswith('APP_ID='):
+                            app_id = line.split('=', 1)[1]
+                    
+                    if client_id and client_secret:
+                        return {
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "app_id": app_id,
+                            "token_endpoint": "http://localhost:8004/auth/login",
+                            "register_endpoint": "http://localhost:8004/register"
+                        }
+            except Exception as e:
+                continue
+    
+    # If no credentials found, return error
+    raise HTTPException(
+        status_code=503,
+        detail="OAuth credentials not available. Run complete_startup.sh to generate credentials."
+    )
+
+
 @app.get("/profiles/{user_id}", response_model=UserProfile)
 async def get_profile(user_id: str):
     """Get user profile (dummy data)"""

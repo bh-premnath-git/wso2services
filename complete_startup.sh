@@ -305,17 +305,17 @@ else
     exit 1
 fi
 
-# Step 6: Create users and roles
-log_step "STEP 6/9: Creating users and roles in WSO2 IS"
+# Step 6: Create roles in WSO2 IS
+log_step "STEP 6/9: Creating roles in WSO2 IS"
 
-if [ -f "app_scripts/setup_is_users_roles.sh" ]; then
-    ./app_scripts/setup_is_users_roles.sh
+if [ -f "app_scripts/setup_roles_only.sh" ]; then
+    ./app_scripts/setup_roles_only.sh
     if [ $? -ne 0 ]; then
-        log_error "Failed to setup users"
+        log_error "Failed to setup roles"
         exit 1
     fi
 else
-    log_error "setup_is_users_roles.sh not found"
+    log_error "setup_roles_only.sh not found"
     exit 1
 fi
 
@@ -334,7 +334,7 @@ else
 fi
 
 # Step 8: Deploy APIs
-log_step "STEP 8/9: Deploying APIs to Gateway"
+log_step "STEP 8/10: Deploying APIs to Gateway"
 
 if [ -f "app_scripts/deploy_apis_to_gateway.sh" ]; then
     ./app_scripts/deploy_apis_to_gateway.sh
@@ -347,8 +347,21 @@ else
     exit 1
 fi
 
-# Step 9: Test integration
-log_step "STEP 9/9: Testing WSO2 IS integration"
+# Step 9: Register test users via Registration API
+log_step "STEP 9/10: Registering test users via Registration API"
+
+if [ -f "app_scripts/register_test_users.sh" ]; then
+    ./app_scripts/register_test_users.sh
+    if [ $? -ne 0 ]; then
+        log_warning "Some test users failed to register (may already exist)"
+        # Don't fail - users might already exist
+    fi
+else
+    log_warning "register_test_users.sh not found - skipping test user registration"
+fi
+
+# Step 10: Test integration
+log_step "STEP 10/10: Testing WSO2 IS integration"
 
 if [ -f "app_scripts/test_wso2is_integration.sh" ]; then
     # Run test in non-interactive mode
@@ -373,10 +386,13 @@ if [ $TEST_RESULT -eq 0 ]; then
     echo "   • PostgreSQL database with clean schema"
     echo "   • Infrastructure: Redis, DynamoDB, Redpanda (Kafka), Jaeger, OTel"
     echo "   • 6 microservices: forex, ledger, payment, profile, rule-engine, wallet"
-    echo "   • WSO2 IS with 5 users (ops_user, finance, auditor, user, app_admin)"
+    echo "   • WSO2 IS with roles (ops_users, finance, auditor, user, app_admin)"
+    echo "   • 5 test users registered via Registration API (ops_user, finance, auditor, user, app_admin)"
     echo "   • WSO2 AM with WSO2-IS-KeyManager"
     echo "   • 6 microservice APIs registered and deployed to gateway"
+    echo "   • OAuth credentials generated (.oauth_credentials file)"
     echo "   • SSL certificates configured"
+    echo "   • User registration API with JWT authentication"
     echo "   • Integration tested and verified"
     echo ""
     echo "🌐 Access URLs:"
@@ -402,12 +418,22 @@ if [ $TEST_RESULT -eq 0 ]; then
     echo "   • DynamoDB Local:     http://localhost:8000"
     echo ""
     echo "🔑 Credentials:"
-    echo "   • Admin: admin / admin"
-    echo "   • Check: /tmp/wso2is_integration_success.txt"
+    echo "   • WSO2 Admin:         admin / admin"
+    echo "   • OAuth Credentials:  .oauth_credentials file"
+    echo "   • Test Users:         See app_scripts/register_test_users.sh"
+    echo "   • Integration Status: /tmp/wso2is_integration_success.txt"
     echo ""
     echo "📝 Next Steps:"
-    echo "   • Test with: ./get_user_token.sh admin admin"
-    echo "   • Validate: ./test_all_users_apis.sh"
+    echo "   • Test all APIs:          ./test_all_users_apis.sh"
+    echo "   • List registered users:  ./list_users_simple.sh"
+    echo "   • Register new user:      curl -X POST http://localhost:8004/register -d '{...}'"
+    echo "   • View documentation:     cat USER_REGISTRATION_GUIDE.md"
+    echo ""
+    echo "🎯 User Registration API:"
+    echo "   • Register:  POST   http://localhost:8004/register"
+    echo "   • Login:     POST   http://localhost:8004/auth/login"
+    echo "   • UserInfo:  GET    http://localhost:8004/auth/userinfo"
+    echo "   • Refresh:   POST   http://localhost:8004/auth/refresh"
     echo ""
     
     # Optional: Create password grant app

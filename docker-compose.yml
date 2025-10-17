@@ -288,6 +288,8 @@ services:
     container_name: profile-service
     ports:
       - "8004:8004"
+    volumes:
+      - ./.oauth_credentials:/app/.oauth_credentials:ro
     environment:
       - SERVICE_NAME=profile_service
       - SERVICE_PORT=8004
@@ -298,6 +300,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=profile-service
       - WSO2_IS_URL=https://wso2is:9443
+      - OAUTH_CREDENTIALS_FILE=/app/.oauth_credentials
     depends_on:
       postgres:
         condition: service_healthy
