@@ -10,7 +10,9 @@ from .models import (
     UserRegistrationRequest,
     UserRegistrationResponse,
     TokenRequest,
-    TokenResponse
+    TokenResponse,
+    PasswordResetRequest,
+    PasswordResetResponse
 )
 
 
@@ -314,6 +316,78 @@ class WSO2IdentityClient:
                         response.status_code,
                         "Failed to refresh token"
                     )
+            
+            except httpx.RequestError as e:
+                raise WSO2ClientError(503, f"Failed to connect to WSO2 IS: {str(e)}")
+    
+    async def reset_password(
+        self,
+        reset_request: PasswordResetRequest
+    ) -> PasswordResetResponse:
+        """
+        Reset user password via SCIM2 API.
+        
+        Args:
+            reset_request: Username and new password
+            
+        Returns:
+            PasswordResetResponse confirming the reset
+            
+        Raises:
+            WSO2ClientError: If password reset fails
+        """
+        async with httpx.AsyncClient(verify=self.verify_ssl) as client:
+            try:
+                # First, get user ID by username
+                response = await client.get(
+                    f"{self.base_url}/scim2/Users",
+                    params={"filter": f"userName eq {reset_request.username}"},
+                    headers={
+                        "Authorization": self.auth_header,
+                        "Accept": "application/scim+json"
+                    },
+                    timeout=30.0
+                )
+                
+                if response.status_code != 200:
+                    raise WSO2ClientError(response.status_code, "Failed to find user")
+                
+                users = response.json().get("Resources", [])
+                if not users:
+                    raise WSO2ClientError(404, f"User '{reset_request.username}' not found")
+                
+                user_id = users[0].get("id")
+                
+                # Update password via SCIM2 PATCH
+                patch_response = await client.patch(
+                    f"{self.base_url}/scim2/Users/{user_id}",
+                    json={
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": [{
+                            "op": "replace",
+                            "value": {
+                                "password": reset_request.new_password,
+                                "active": True
+                            }
+                        }]
+                    },
+                    headers={
+                        "Authorization": self.auth_header,
+                        "Content-Type": "application/scim+json",
+                        "Accept": "application/scim+json"
+                    },
+                    timeout=30.0
+                )
+                
+                if patch_response.status_code == 200:
+                    return PasswordResetResponse(
+                        status="success",
+                        message="Password reset successfully",
+                        username=reset_request.username
+                    )
+                else:
+                    error_data = patch_response.json() if "application/json" in patch_response.headers.get("content-type", "") else patch_response.text
+                    raise WSO2ClientError(patch_response.status_code, error_data)
             
             except httpx.RequestError as e:
                 raise WSO2ClientError(503, f"Failed to connect to WSO2 IS: {str(e)}")

@@ -18,7 +18,9 @@ from auth.models import (
     UserRegistrationRequest,
     UserRegistrationResponse,
     TokenRequest,
-    TokenResponse
+    TokenResponse,
+    PasswordResetRequest,
+    PasswordResetResponse
 )
 
 app = FastAPI(
@@ -142,6 +144,39 @@ async def refresh_access_token(
         return await wso2_client.refresh_token(
             refresh_token, client_id, client_secret
         )
+    except WSO2ClientError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+@app.post("/auth/reset-password", response_model=PasswordResetResponse)
+async def reset_password(reset_request: PasswordResetRequest):
+    """
+    Reset user password.
+    
+    **Request body:**
+    ```json
+    {
+      "username": "johndoe",
+      "new_password": "NewSecurePass123!"
+    }
+    ```
+    
+    **Password requirements:**
+    - Minimum 8 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
+    
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8004/auth/reset-password \\
+      -H "Content-Type: application/json" \\
+      -d '{"username": "johndoe", "new_password": "NewPass123!"}'
+    ```
+    """
+    try:
+        return await wso2_client.reset_password(reset_request)
     except WSO2ClientError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 

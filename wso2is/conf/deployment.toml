@@ -146,7 +146,7 @@ claims = [
 # JWT Token Configuration
 [oauth.token_generation]
 include_username_in_access_token = true
-access_token_type = "self_contained"  # Generates JWT tokens
+access_token_type = "default"  # Generates opaque tokens (fixes JWT parsing errors)
 
 [oauth.oidc.id_token]
 id_token_issuer = "https://localhost:9444/oauth2/token"
@@ -170,3 +170,14 @@ secure = true
 http_method = "all"
 permissions = ["/permission/admin/manage/identity/applicationmgt"]
 scopes = []
+
+# ============================================
+# Password Grant Configuration
+# ============================================
+[oauth.grant_type.password]
+enable = true
+include_username_in_subject = true
+
+[authentication.authenticator.basic]
+name = "BasicAuthenticator"
+enable = true

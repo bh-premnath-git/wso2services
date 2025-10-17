@@ -348,7 +348,7 @@ else
 fi
 
 # Step 9: Register test users via Registration API
-log_step "STEP 9/10: Registering test users via Registration API"
+log_step "STEP 9/11: Registering test users via Registration API"
 
 if [ -f "app_scripts/register_test_users.sh" ]; then
     ./app_scripts/register_test_users.sh
@@ -360,8 +360,20 @@ else
     log_warning "register_test_users.sh not found - skipping test user registration"
 fi
 
-# Step 10: Test integration
-log_step "STEP 10/10: Testing WSO2 IS integration"
+# Step 10: Reset test user passwords (ensures password grant works)
+log_step "STEP 10/11: Resetting test user passwords for OAuth"
+
+if [ -f "app_scripts/reset_test_user_passwords.sh" ]; then
+    ./app_scripts/reset_test_user_passwords.sh
+    if [ $? -ne 0 ]; then
+        log_warning "Password reset had some failures"
+    fi
+else
+    log_warning "reset_test_user_passwords.sh not found - passwords may not work"
+fi
+
+# Step 11: Test integration
+log_step "STEP 11/11: Testing WSO2 IS integration"
 
 if [ -f "app_scripts/test_wso2is_integration.sh" ]; then
     # Run test in non-interactive mode

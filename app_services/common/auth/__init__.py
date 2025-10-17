@@ -6,9 +6,10 @@ from .models import (
     UserRegistrationResponse,
     TokenRequest,
     TokenResponse,
-    AddressInfo
+    AddressInfo,
+    PasswordResetRequest,
+    PasswordResetResponse
 )
-from .wso2_client import WSO2IdentityClient, WSO2ClientError
 
 __all__ = [
     "UserRegistrationRequest",
@@ -16,6 +17,8 @@ __all__ = [
     "TokenRequest",
     "TokenResponse",
     "AddressInfo",
+    "PasswordResetRequest",
+    "PasswordResetResponse",
     "WSO2IdentityClient",
     "WSO2ClientError"
 ]

@@ -114,3 +114,33 @@ class TokenResponse(BaseModel):
     token_type: str
     scope: str
     decoded_claims: Optional[dict] = None
+
+
+class PasswordResetRequest(BaseModel):
+    """Password reset request"""
+    username: str = Field(..., min_length=3, max_length=50)
+    new_password: str = Field(..., min_length=8)
+    
+    @validator('new_password')
+    def validate_password_strength(cls, v):
+        """Enforce strong password policy"""
+        errors = []
+        if not re.search(r'[A-Z]', v):
+            errors.append("at least one uppercase letter")
+        if not re.search(r'[a-z]', v):
+            errors.append("at least one lowercase letter")
+        if not re.search(r'\d', v):
+            errors.append("at least one digit")
+        if not re.search(r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>?/\\|`~]', v):
+            errors.append("at least one special character")
+        
+        if errors:
+            raise ValueError(f"Password must contain {', '.join(errors)}")
+        return v
+
+
+class PasswordResetResponse(BaseModel):
+    """Response after password reset"""
+    status: str
+    message: str
+    username: str
