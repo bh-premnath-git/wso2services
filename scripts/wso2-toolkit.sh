@@ -257,6 +257,7 @@ cmd_setup_km() {
     
     # Use static IS 7.x endpoints (well-known URL in payload auto-discovers at runtime)
     log_info "Using well-known endpoint: https://${WSO2IS_HOST}:${WSO2IS_PORT}/oauth2/token/.well-known/openid-configuration"
+    log_info "WSO2IS Key Manager uses admin credentials for introspection and DCR"
     
     # Static endpoints for IS 7.x
     local token_ep="https://${WSO2IS_HOST}:${WSO2IS_PORT}/oauth2/token"
@@ -268,27 +269,39 @@ cmd_setup_km() {
     
     # APIM 4.5.0 complete Key Manager configuration
     # Based on official WSO2 documentation
+    # Use jq to build JSON with proper variable expansion
     local payload
-    read -r -d '' payload <<EOF || true
-{
-  "name": "${km_name}",
+    payload=$(jq -n \
+        --arg name "${km_name}" \
+        --arg is_host "${WSO2IS_HOST}" \
+        --arg is_port "${WSO2IS_PORT}" \
+        --arg username "${WSO2IS_ADMIN_USER}" \
+        --arg password "${WSO2IS_ADMIN_PASS}" \
+        --arg token_ep "${token_ep}" \
+        --arg revoke_ep "${revoke_ep}" \
+        --arg introspect_ep "${introspect_ep}" \
+        --arg authorize_ep "${authorize_ep}" \
+        --arg jwks_ep "${jwks_ep}" \
+        --arg issuer "${issuer}" \
+        '{
+  "name": $name,
   "displayName": "WSO2 Identity Server 7.1",
   "type": "WSO2-IS",
   "description": "WSO2 Identity Server 7.1 as external OAuth2 Key Manager",
   "enabled": true,
   "tokenType": "DIRECT",
-  "wellKnownEndpoint": "https://${WSO2IS_HOST}:${WSO2IS_PORT}/oauth2/token/.well-known/openid-configuration",
-  "introspectionEndpoint": "${introspect_ep}",
-  "clientRegistrationEndpoint": "https://${WSO2IS_HOST}:${WSO2IS_PORT}/api/identity/oauth2/dcr/v1.1/register",
-  "tokenEndpoint": "${token_ep}",
-  "revokeEndpoint": "${revoke_ep}",
-  "userInfoEndpoint": "https://${WSO2IS_HOST}:${WSO2IS_PORT}/oauth2/userinfo",
-  "authorizeEndpoint": "${authorize_ep}",
-  "scopeManagementEndpoint": "https://${WSO2IS_HOST}:${WSO2IS_PORT}/api/identity/oauth2/v1.0/scopes",
-  "issuer": "${issuer}",
+  "wellKnownEndpoint": ("https://" + $is_host + ":" + $is_port + "/oauth2/token/.well-known/openid-configuration"),
+  "introspectionEndpoint": $introspect_ep,
+  "clientRegistrationEndpoint": ("https://" + $is_host + ":" + $is_port + "/api/identity/oauth2/dcr/v1.1/register"),
+  "tokenEndpoint": $token_ep,
+  "revokeEndpoint": $revoke_ep,
+  "userInfoEndpoint": ("https://" + $is_host + ":" + $is_port + "/scim2/Me"),
+  "authorizeEndpoint": $authorize_ep,
+  "scopeManagementEndpoint": ("https://" + $is_host + ":" + $is_port + "/api/identity/oauth2/v1.0/scopes"),
+  "issuer": $issuer,
   "certificates": {
     "type": "JWKS",
-    "value": "${jwks_ep}"
+    "value": $jwks_ep
   },
   "availableGrantTypes": [
     "password",
@@ -321,25 +334,24 @@ cmd_setup_km() {
     }
   ],
   "additionalProperties": {
-    "ServerURL": "https://${WSO2IS_HOST}:${WSO2IS_PORT}/services",
-    "Username": "${WSO2IS_ADMIN_USER}",
-    "Password": "${WSO2IS_ADMIN_PASS}",
-    "TokenURL": "${token_ep}",
-    "RevokeURL": "${revoke_ep}",
-    "IntrospectURL": "${introspect_ep}",
-    "AuthorizeURL": "${authorize_ep}",
-    "UserInfoURL": "https://${WSO2IS_HOST}:${WSO2IS_PORT}/oauth2/userinfo",
-    "JWKSEndpoint": "${jwks_ep}",
+    "ServerURL": ("https://" + $is_host + ":" + $is_port + "/services"),
+    "Username": $username,
+    "Password": $password,
+    "TokenURL": $token_ep,
+    "RevokeURL": $revoke_ep,
+    "IntrospectURL": $introspect_ep,
+    "AuthorizeURL": $authorize_ep,
+    "UserInfoURL": ("https://" + $is_host + ":" + $is_port + "/scim2/Me"),
+    "JWKSEndpoint": $jwks_ep,
     "ScopeClaim": "scope",
     "ConsumerKeyClaim": "azp",
     "VALIDITY_PERIOD": "3600",
     "validation_enable": true,
     "self_validate_jwt": false,
-    "api_resource_mgt_endpoint": "https://${WSO2IS_HOST}:${WSO2IS_PORT}/api/server/v1/api-resources",
-    "roles_endpoint": "https://${WSO2IS_HOST}:${WSO2IS_PORT}/scim2/Roles"
+    "api_resource_mgt_endpoint": ("https://" + $is_host + ":" + $is_port + "/api/server/v1/api-resources"),
+    "roles_endpoint": ("https://" + $is_host + ":" + $is_port + "/scim2/Roles")
   }
-}
-EOF
+}')
     
     log_info "Creating Key Manager '${km_name}'..."
     local response
@@ -497,21 +509,37 @@ cmd_check_mtls() {
     
     log_info "Checking certificate trust in APIM truststore..."
     
-    # Check if IS cert is in APIM truststore
+    # Check if IS cert is in APIM JKS truststore (APIM 4.5 uses JKS)
     local cert_check
     cert_check=$(docker exec wso2am keytool -list \
         -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks \
         -storepass wso2carbon -alias wso2is 2>&1 || true)
     
-    if echo "${cert_check}" | grep -q "wso2is"; then
+    if echo "${cert_check}" | grep -q "trustedCertEntry"; then
         log_success "✓ IS certificate exists in APIM truststore"
     else
         log_warn "⚠️  IS certificate NOT found in APIM truststore"
         log_info "Run: $0 fix-mtls to add the certificate"
     fi
     
+    log_info "Checking certificate trust in IS truststore..."
+    
+    # Check if APIM cert is in IS PKCS12 truststore
+    local cert_check_is
+    cert_check_is=$(docker exec wso2is keytool -list \
+        -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
+        -storetype PKCS12 \
+        -storepass wso2carbon -alias wso2am 2>&1 || true)
+    
+    if echo "${cert_check_is}" | grep -q "trustedCertEntry"; then
+        log_success "✓ APIM certificate exists in IS truststore"
+    else
+        log_warn "⚠️  APIM certificate NOT found in IS truststore"
+        log_info "Run: $0 fix-mtls to add the certificate"
+    fi
+    
     echo ""
-    log_success "MTLS check complete!"
+    log_success "✅ MTLS check complete!"
     echo ""
     log_info "For production, ensure proper CA-signed certificates"
     log_info "For development, run 'fix-mtls' if needed"
@@ -531,10 +559,12 @@ cmd_fix_mtls() {
     echo "=========================================="
     echo ""
     
+    # Step 1: Export IS certificate from PKCS12 keystore
     log_info "Exporting IS certificate..."
     
     docker exec wso2is keytool -export -alias wso2carbon \
-        -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.jks \
+        -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
+        -storetype PKCS12 \
         -file /tmp/wso2is.crt -storepass wso2carbon >/dev/null 2>&1
     
     if [ $? -ne 0 ]; then
@@ -544,31 +574,70 @@ cmd_fix_mtls() {
     
     log_success "✓ IS certificate exported"
     
+    # Step 2: Import IS certificate to APIM truststore
     log_info "Importing IS certificate to APIM truststore..."
     
     # Copy cert from IS to APIM
     docker cp wso2is:/tmp/wso2is.crt /tmp/wso2is.crt
     docker cp /tmp/wso2is.crt wso2am:/tmp/wso2is.crt
     
-    # Import to APIM truststore
+    # Import to APIM JKS truststore (APIM 4.5 uses JKS)
     docker exec wso2am keytool -import -alias wso2is \
         -file /tmp/wso2is.crt \
         -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks \
         -storepass wso2carbon -noprompt >/dev/null 2>&1
     
     if [ $? -ne 0 ]; then
-        log_warn "Certificate may already exist or import failed"
+        log_warn "Certificate may already exist in truststore"
     else
         log_success "✓ IS certificate imported to APIM truststore"
     fi
     
+    # Step 3: Export APIM certificate
+    log_info "Exporting APIM certificate..."
+    
+    docker exec wso2am keytool -export -alias wso2carbon \
+        -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/wso2carbon.jks \
+        -file /tmp/wso2am.crt -storepass wso2carbon >/dev/null 2>&1
+    
+    if [ $? -ne 0 ]; then
+        log_error "Failed to export APIM certificate"
+        return 1
+    fi
+    
+    log_success "✓ APIM certificate exported"
+    
+    # Step 4: Import APIM certificate to IS truststore
+    log_info "Importing APIM certificate to IS truststore..."
+    
+    # Copy cert from APIM to IS
+    docker cp wso2am:/tmp/wso2am.crt /tmp/wso2am.crt
+    docker cp /tmp/wso2am.crt wso2is:/tmp/wso2am.crt
+    
+    # Import to IS PKCS12 truststore
+    docker exec wso2is keytool -import -alias wso2am \
+        -file /tmp/wso2am.crt \
+        -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
+        -storetype PKCS12 \
+        -storepass wso2carbon -noprompt >/dev/null 2>&1
+    
+    if [ $? -ne 0 ]; then
+        log_warn "Certificate may already exist in truststore"
+    else
+        log_success "✓ APIM certificate imported to IS truststore"
+    fi
+    
     # Cleanup
-    rm -f /tmp/wso2is.crt
+    rm -f /tmp/wso2is.crt /tmp/wso2am.crt
+    docker exec wso2is rm -f /tmp/wso2is.crt /tmp/wso2am.crt 2>/dev/null
+    docker exec wso2am rm -f /tmp/wso2is.crt /tmp/wso2am.crt 2>/dev/null
     
     echo ""
-    log_success "MTLS certificate trust configured!"
-    log_warn "⚠️  Restart APIM to apply changes:"
-    echo "     docker restart wso2am"
+    log_success "✅ MTLS certificate trust configured!"
+    log_warn "⚠️  Restart both containers to apply changes:"
+    echo "     docker restart wso2am wso2is"
+    echo ""
+    echo "After restart, wait ~60 seconds for services to initialize."
     echo ""
 }
 
@@ -1071,10 +1140,10 @@ cmd_create_role() {
     log_info "Checking if role '${role_name}' exists..."
     local existing_role
     existing_role=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
-        "${scim_api}?filter=displayName%20eq%20%22${role_name}%22" 2>/dev/null)
+        "${scim_api}?filter=displayName%20eq%20%22${role_name}%22" 2>/dev/null || true)
     
     local role_id
-    role_id=$(echo "${existing_role}" | jq -r '.Resources[0].id // empty' 2>/dev/null)
+    role_id=$(echo "${existing_role}" | jq -r '.Resources[0].id // empty' 2>/dev/null || true)
     
     if [ -n "${role_id}" ]; then
         log_warn "Role '${role_name}' already exists (ID: ${role_id})"
@@ -1109,9 +1178,9 @@ EOF
     response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
         -H "Content-Type: application/json" \
         -d "${payload}" \
-        -X POST "${scim_api}" 2>&1)
+        -X POST "${scim_api}" 2>&1 || true)
     
-    role_id=$(echo "${response}" | jq -r '.id // empty' 2>/dev/null)
+    role_id=$(echo "${response}" | jq -r '.id // empty' 2>/dev/null || true)
     
     if [ -n "${role_id}" ] && [ "${role_id}" != "null" ]; then
         log_success "Role '${role_name}' created successfully"
@@ -1130,14 +1199,15 @@ EOF
             response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
                 -H "Content-Type: application/json" \
                 -d "${payload}" \
-                -X POST "${scim_api}" 2>&1)
+                -X POST "${scim_api}" 2>&1 || true)
             
-            role_id=$(echo "${response}" | jq -r '.id // empty' 2>/dev/null)
+            role_id=$(echo "${response}" | jq -r '.id // empty' 2>/dev/null || true)
             
             if [ -n "${role_id}" ] && [ "${role_id}" != "null" ]; then
-                log_success "Role '${role_name}' created as internal role"
+                log_success "Role '${role_name}' created successfully (as internal role)"
                 echo ""
                 echo "Role ID: ${role_id}"
+                echo "Display Name: ${role_name}"
                 echo ""
                 return 0
             fi
@@ -1181,15 +1251,15 @@ cmd_create_roles() {
         if cmd_create_role "${role}" "application" > /tmp/role_create_${role}.log 2>&1; then
             if grep -q "already exists" /tmp/role_create_${role}.log; then
                 log_warn "${role} - already exists"
-                ((existing++))
+                existing=$((existing + 1))
             else
                 log_success "${role} - created"
-                ((created++))
+                created=$((created + 1))
             fi
         else
             log_error "${role} - failed"
             cat /tmp/role_create_${role}.log
-            ((failed++))
+            failed=$((failed + 1))
         fi
         rm -f /tmp/role_create_${role}.log
     done

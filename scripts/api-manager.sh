@@ -297,6 +297,7 @@ cmd_create_api() {
     "businessOwner": "API Team",
     "businessOwnerEmail": "api@example.com"
   },
+  "policies": ["Unlimited"],
   "subscriptionAvailability": "ALL_TENANTS",
   "gatewayVendor": "wso2",
   "isDefaultVersion": false,
@@ -701,7 +702,8 @@ EOF
 ################################################################################
 
 cmd_list_subscriptions() {
-    local api_id=${1:-}
+    local id=${1:-}
+    local filter_type=${2:-"app"}  # Default to application filter
     
     check_dependencies || return 1
     check_container "wso2am" || return 1
@@ -713,12 +715,23 @@ cmd_list_subscriptions() {
     echo ""
     
     local url="${DEVPORTAL_API}/subscriptions?limit=100"
-    if [ -n "${api_id}" ]; then
-        local encoded_api_id=$(url_encode "${api_id}")
-        url="${url}&apiId=${encoded_api_id}"
-        log_info "Fetching subscriptions for API ${api_id}..."
+    if [ -n "${id}" ]; then
+        local encoded_id=$(url_encode "${id}")
+        if [ "${filter_type}" = "api" ]; then
+            url="${url}&apiId=${encoded_id}"
+            log_info "Fetching subscriptions for API ${id}..."
+        else
+            url="${url}&applicationId=${encoded_id}"
+            log_info "Fetching subscriptions for Application ${id}..."
+        fi
     else
-        log_info "Fetching all subscriptions..."
+        log_error "Usage: $0 list-subscriptions <app-id|api-id> [app|api]"
+        echo ""
+        echo "Examples:"
+        echo "  $0 list-subscriptions <app-id>        # List by application (default)"
+        echo "  $0 list-subscriptions <app-id> app    # List by application"
+        echo "  $0 list-subscriptions <api-id> api    # List by API"
+        return 1
     fi
     
     local response
