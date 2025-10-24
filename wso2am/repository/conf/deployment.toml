@@ -78,15 +78,15 @@ provider = "wso2"
 display_in_api_console = true
 description = "This is a hybrid gateway that handles both production and sandbox token traffic."
 show_as_token_endpoint_url = true
-service_url = "https://localhost:${mgt.transport.https.port}/services/"
+service_url = "https://wso2am:${mgt.transport.https.port}/services/"
 username= "${admin.username}"
 password= "${admin.password}"
-ws_endpoint = "ws://localhost:9099"
-wss_endpoint = "wss://localhost:8099"
+ws_endpoint = "ws://wso2am:9099"
+wss_endpoint = "wss://wso2am:8099"
 http_endpoint = "http://localhost:${http.nio.port}"
 https_endpoint = "https://localhost:${https.nio.port}"
-websub_event_receiver_http_endpoint = "http://localhost:9021"
-websub_event_receiver_https_endpoint = "https://localhost:8021"
+websub_event_receiver_http_endpoint = "http://wso2am:9021"
+websub_event_receiver_https_endpoint = "https://wso2am:8021"
 
 [apim.sync_runtime_artifacts.gateway]
 gateway_labels =["Default"]
@@ -286,17 +286,6 @@ sp_name_regex = "^[\\sa-zA-Z0-9._-]*$"
 
 [database.local]
 url = "jdbc:h2:./repository/database/WSO2CARBON_DB;DB_CLOSE_ON_EXIT=FALSE"
-
-[[event_listener]]
-id = "token_revocation"
-type = "org.wso2.carbon.identity.core.handler.AbstractIdentityHandler"
-name = "org.wso2.is.notification.ApimOauthEventInterceptor"
-order = 1
-[event_listener.properties]
-notification_endpoint = "https://localhost:${mgt.transport.https.port}/internal/data/v1/notify"
-username = "${admin.username}"
-password = "${admin.password}"
-'header.X-WSO2-KEY-MANAGER' = "WSO2IS"
 
 [oauth.grant_type.token_exchange]
 enable = true
