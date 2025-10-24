@@ -44,28 +44,28 @@ testOnBorrow = true
 validationInterval = 30000
 
 [keystore.tls]
+file_name =  "wso2am.jks"
+type =  "JKS"
+password =  "changeit"
+alias =  "wso2am"
+key_password =  "changeit"
+
+#[keystore.listener_profile]
+#bind_address = "0.0.0.0"
+
+[keystore.primary]
 file_name =  "wso2carbon.jks"
 type =  "JKS"
 password =  "wso2carbon"
 alias =  "wso2carbon"
 key_password =  "wso2carbon"
 
-#[keystore.listener_profile]
-#bind_address = "0.0.0.0"
-
-#[keystore.primary]
-#file_name =  "wso2carbon.jks"
-#type =  "JKS"
-#password =  "wso2carbon"
-#alias =  "wso2carbon"
-#key_password =  "wso2carbon"
-
-#[keystore.internal]
-#file_name =  "wso2carbon.jks"
-#type =  "JKS"
-#password =  "wso2carbon"
-#alias =  "wso2carbon"
-#key_password =  "wso2carbon"
+[keystore.internal]
+file_name =  "wso2carbon.jks"
+type =  "JKS"
+password =  "wso2carbon"
+alias =  "wso2carbon"
+key_password =  "wso2carbon"
 
 [apim]
 gateway_type = "Regular,APK,AWS"

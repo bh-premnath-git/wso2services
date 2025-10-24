@@ -54,6 +54,9 @@ class Config:
     SENDER_EMAIL: str = os.getenv("SENDER_EMAIL", "")
     SENDER_PASSWORD: str = os.getenv("SENDER_PASSWORD", "")
 
+    OANDA_API_BASE: str = os.getenv("OANDA_API_BASE", "https://exchange-rates-api.oanda.com/v2")
+    OANDA_API_KEY: str = os.getenv("OANDA_API_KEY", "")
+
     @classmethod
     def validate_smtp_config(cls) -> bool:
         """Validate that required SMTP configuration is present"""

@@ -6,8 +6,8 @@ echo ""
 
 # Start services
 echo "1. Starting services..."
-docker compose up -d
-sleep 120
+docker compose up -d --build
+sleep 150
 
 # Health check
 echo "2. Health check..."

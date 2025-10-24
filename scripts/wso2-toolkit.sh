@@ -559,6 +559,99 @@ cmd_fix_mtls() {
     echo "=========================================="
     echo ""
     
+    # Ensure APIM TLS keystore exists with proper SANs (separate from internal keystore)
+    log_info "Ensuring APIM TLS keystore (wso2am.jks) has proper SANs..."
+    local tls_keystore="/home/wso2carbon/wso2am-4.5.0/repository/resources/security/wso2am.jks"
+    local tls_alias="wso2am"
+    local tls_pass="changeit"
+
+    # Check if keystore exists and contains SAN=wso2am
+    local tls_sans
+    tls_sans=$(docker exec wso2am sh -lc "if [ -f '${tls_keystore}' ]; then keytool -list -v -keystore '${tls_keystore}' -storepass '${tls_pass}' -alias '${tls_alias}' 2>/dev/null | grep -A 1 SubjectAlternativeName || true; fi")
+    if [ -z "${tls_sans}" ] || ! echo "${tls_sans}" | grep -q "wso2am"; then
+        log_warn "⚠️  TLS keystore missing or SANs incomplete. Creating wso2am.jks..."
+        # Remove any existing keystore to avoid alias conflicts
+        docker exec wso2am sh -lc "rm -f '${tls_keystore}'"
+        # Generate new TLS keystore with SANs
+        docker exec wso2am keytool -genkeypair -alias "${tls_alias}" \
+            -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname "CN=wso2am, OU=WSO2, O=WSO2, L=Mountain View, ST=CA, C=US" \
+            -ext "SAN=dns:wso2am,dns:localhost,ip:127.0.0.1" \
+            -keystore "${tls_keystore}" \
+            -storepass "${tls_pass}" -keypass "${tls_pass}" >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            log_error "Failed to create APIM TLS keystore (wso2am.jks)"
+            return 1
+        fi
+        log_success "✓ Created APIM TLS keystore with SANs: wso2am, localhost"
+    else
+        log_success "✓ APIM TLS keystore already valid"
+    fi
+
+    # Update APIM client-truststore to trust its TLS cert (self-trust for internal HTTPS calls)
+    log_info "Updating APIM client-truststore with TLS certificate..."
+    docker exec wso2am keytool -export -alias "${tls_alias}" -keystore "${tls_keystore}" -file /tmp/wso2am-tls.crt -storepass "${tls_pass}" >/dev/null 2>&1
+    docker exec wso2am keytool -delete -alias "${tls_alias}" -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks -storepass wso2carbon >/dev/null 2>&1
+    docker exec wso2am keytool -import -alias "${tls_alias}" -file /tmp/wso2am-tls.crt -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks -storepass wso2carbon -noprompt >/dev/null 2>&1
+    log_success "✓ APIM client-truststore trusts TLS cert (alias wso2am)"
+    
+    # Check IS certificate
+    log_info "Checking IS certificate SANs..."
+    local is_sans
+    is_sans=$(docker exec wso2is keytool -list -v -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 -storetype PKCS12 -storepass wso2carbon -alias wso2carbon 2>&1 | grep -A 1 "SubjectAlternativeName")
+    
+    if ! echo "$is_sans" | grep -q "wso2is"; then
+        log_warn "⚠️  IS certificate missing 'wso2is' in SANs. Regenerating..."
+        
+        # Backup existing keystore
+        docker exec wso2is cp /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
+            /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12.backup
+        
+        # Delete old certificate
+        docker exec wso2is keytool -delete -alias wso2carbon \
+            -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
+            -storetype PKCS12 -storepass wso2carbon >/dev/null 2>&1
+        
+        # Generate new certificate with proper SANs
+        docker exec wso2is keytool -genkeypair -alias wso2carbon \
+            -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname "CN=localhost, OU=WSO2, O=WSO2, L=Santa Clara, ST=CA, C=US" \
+            -ext "SAN=dns:wso2is,dns:localhost,ip:127.0.0.1" \
+            -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
+            -storetype PKCS12 -storepass wso2carbon -keypass wso2carbon >/dev/null 2>&1
+        
+        if [ $? -eq 0 ]; then
+            log_success "✓ IS certificate regenerated with SANs: wso2is, localhost"
+            
+            # CRITICAL: Update self-trust - export new cert to truststore
+            log_info "Updating IS self-trust..."
+            docker exec wso2is keytool -export -alias wso2carbon \
+                -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
+                -storetype PKCS12 -file /tmp/wso2is-self.crt -storepass wso2carbon >/dev/null 2>&1
+            
+            docker exec wso2is keytool -delete -alias wso2carbon \
+                -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
+                -storetype PKCS12 -storepass wso2carbon >/dev/null 2>&1
+            
+            docker exec wso2is keytool -import -alias wso2carbon \
+                -file /tmp/wso2is-self.crt \
+                -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
+                -storetype PKCS12 -storepass wso2carbon -noprompt >/dev/null 2>&1
+            
+            if [ $? -eq 0 ]; then
+                log_success "✓ IS self-trust updated"
+            else
+                log_error "Failed to update IS self-trust"
+                return 1
+            fi
+        else
+            log_error "Failed to regenerate IS certificate"
+            return 1
+        fi
+    else
+        log_success "✓ IS certificate already has proper SANs"
+    fi
+    
     # Step 1: Export IS certificate from PKCS12 keystore
     log_info "Exporting IS certificate..."
     
@@ -581,6 +674,14 @@ cmd_fix_mtls() {
     docker cp wso2is:/tmp/wso2is.crt /tmp/wso2is.crt
     docker cp /tmp/wso2is.crt wso2am:/tmp/wso2is.crt
     
+    # Delete old IS certificate if exists (both potential aliases)
+    docker exec wso2am keytool -delete -alias wso2is \
+        -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks \
+        -storepass wso2carbon >/dev/null 2>&1
+    
+    # Also clean up old wso2carbon alias from IS if it exists (prevents signature mismatch)
+    docker exec wso2am bash -c "keytool -list -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks -storepass wso2carbon -alias wso2carbon 2>&1 | grep -q 'wso2is' && keytool -delete -alias wso2carbon -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks -storepass wso2carbon" >/dev/null 2>&1
+    
     # Import to APIM JKS truststore (APIM 4.5 uses JKS)
     docker exec wso2am keytool -import -alias wso2is \
         -file /tmp/wso2is.crt \
@@ -588,17 +689,18 @@ cmd_fix_mtls() {
         -storepass wso2carbon -noprompt >/dev/null 2>&1
     
     if [ $? -ne 0 ]; then
-        log_warn "Certificate may already exist in truststore"
+        log_error "Failed to import IS certificate to APIM truststore"
+        return 1
     else
         log_success "✓ IS certificate imported to APIM truststore"
     fi
     
-    # Step 3: Export APIM certificate
-    log_info "Exporting APIM certificate..."
+    # Step 3: Export APIM TLS certificate (from wso2am.jks)
+    log_info "Exporting APIM TLS certificate..."
     
-    docker exec wso2am keytool -export -alias wso2carbon \
-        -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/wso2carbon.jks \
-        -file /tmp/wso2am.crt -storepass wso2carbon >/dev/null 2>&1
+    docker exec wso2am keytool -export -alias "${tls_alias}" \
+        -keystore "${tls_keystore}" \
+        -file /tmp/wso2am.crt -storepass "${tls_pass}" >/dev/null 2>&1
     
     if [ $? -ne 0 ]; then
         log_error "Failed to export APIM certificate"
@@ -614,6 +716,11 @@ cmd_fix_mtls() {
     docker cp wso2am:/tmp/wso2am.crt /tmp/wso2am.crt
     docker cp /tmp/wso2am.crt wso2is:/tmp/wso2am.crt
     
+    # Delete old APIM certificate if exists
+    docker exec wso2is keytool -delete -alias wso2am \
+        -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
+        -storetype PKCS12 -storepass wso2carbon >/dev/null 2>&1
+    
     # Import to IS PKCS12 truststore
     docker exec wso2is keytool -import -alias wso2am \
         -file /tmp/wso2am.crt \
@@ -622,7 +729,8 @@ cmd_fix_mtls() {
         -storepass wso2carbon -noprompt >/dev/null 2>&1
     
     if [ $? -ne 0 ]; then
-        log_warn "Certificate may already exist in truststore"
+        log_error "Failed to import APIM certificate to IS truststore"
+        return 1
     else
         log_success "✓ APIM certificate imported to IS truststore"
     fi
