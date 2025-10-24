@@ -1,5 +1,6 @@
 [server]
 hostname = "localhost"
+node_ip = "127.0.0.1"
 base_path = "https://$ref{server.hostname}:${carbon.management.port}"
 
 [super_admin]
@@ -11,34 +12,16 @@ create_admin_account = true
 type = "database_unique_id"
 
 [database.identity_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/identity_db"
+type = "h2"
+url = "jdbc:h2:./repository/database/WSO2IDENTITY_DB;DB_CLOSE_ON_EXIT=FALSE;LOCK_TIMEOUT=60000"
 username = "wso2carbon"
 password = "wso2carbon"
-driver = "org.postgresql.Driver"
-validationQuery = "SELECT 1"
-
-[database.identity_db.pool_options]
-maxActive = 80
-maxWait = 60000
-minIdle = 5
-testOnBorrow = true
-validationInterval = 30000
 
 [database.shared_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/shared_db_is"
+type = "h2"
+url = "jdbc:h2:./repository/database/WSO2SHARED_DB;DB_CLOSE_ON_EXIT=FALSE;LOCK_TIMEOUT=60000"
 username = "wso2carbon"
 password = "wso2carbon"
-driver = "org.postgresql.Driver"
-validationQuery = "SELECT 1"
-
-[database.shared_db.pool_options]
-maxActive = 80
-maxWait = 60000
-minIdle = 5
-testOnBorrow = true
-validationInterval = 30000
 
 [keystore.primary]
 file_name = "wso2carbon.p12"
@@ -90,34 +73,3 @@ app_password= "dashboard"
 #password= "xxxx"
 #hostname= "smtp.gmail.com"
 #port= 587
-
-################################################################################
-# WSO2 IS 7.x as External Key Manager Configuration
-# Official Documentation: https://apim.docs.wso2.com/en/latest/install-and-setup/setup/distributed-deployment/configure-wso2-is-7-as-a-key-manager/
-################################################################################
-
-# Allow all scopes to be authorized
-[oauth]
-authorize_all_scopes = true
-
-# SCIM2 /Me endpoint access control for UserInfo
-[[resource.access_control]]
-context = "(.*)/scim2/Me"
-secure = true
-http_method = "GET"
-cross_tenant = true
-permissions = []
-scopes = []
-
-# Token revocation event listener for APIM
-[[event_listener]]
-id = "token_revocation"
-type = "org.wso2.carbon.identity.core.handler.AbstractIdentityHandler"
-name = "org.wso2.is.notification.ApimOauthEventInterceptor"
-order = 1
-
-[event_listener.properties]
-notification_endpoint = "https://wso2am:9443/internal/data/v1/notify"
-username = "${admin.username}"
-password = "${admin.password}"
-'header.X-WSO2-KEY-MANAGER' = "default"
