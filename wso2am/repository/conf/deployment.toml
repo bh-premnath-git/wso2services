@@ -210,7 +210,7 @@ order = 1
 notification_endpoint = "https://wso2is:9443/internal/data/v1/notify"
 username = "${admin.username}"
 password = "${admin.password}"
-'header.X-WSO2-KEY-MANAGER' = "default"
+'header.X-WSO2-KEY-MANAGER' = "WSO2IS"
 
 #[apim.throttling.jms]
 #start_delay = "5m"
