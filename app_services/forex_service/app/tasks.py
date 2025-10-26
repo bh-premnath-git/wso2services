@@ -1,8 +1,11 @@
-from typing import List, Dict
+import json
 import os
 import sys
-import json
+from decimal import Decimal
+from typing import Any, Dict, List
+
 import httpx
+from botocore.exceptions import ClientError
 from celery.utils.log import get_task_logger
 
 # Add common module to path
@@ -12,12 +15,11 @@ if os.path.exists(common_path):
 else:
     sys.path.insert(0, '/app/common')
 
+from utils import get_ddb_table, now_iso, prepare_endpoint
 from config import config
 from .celery_app import celery_app
 
 import redis
-from datetime import datetime, timezone
-from decimal import Decimal
 
 log = get_task_logger(__name__)
 
@@ -25,13 +27,12 @@ log = get_task_logger(__name__)
 r_cache = redis.Redis.from_url(config.FOREX_REDIS_URL, decode_responses=True)
 TTL = config.CACHE_TTL_SECONDS
 
+_DDB_ENDPOINT = prepare_endpoint(config.DDB_ENDPOINT)
+_DDB_TABLE = get_ddb_table(config.AWS_REGION, _DDB_ENDPOINT, config.DDB_TABLE)
+
 
 def _pairs() -> List[str]:
     return [p.strip().upper() for p in config.PAIRS_CSV.split(",") if p.strip()]
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 def _cache_key(pair: str) -> str:
@@ -39,15 +40,25 @@ def _cache_key(pair: str) -> str:
     return f"fx:rate:{base}-{quote}::"  # intentionally matches GET without time filters
 
 
+def _to_native(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return int(value) if value % 1 == 0 else float(value)
+    if isinstance(value, dict):
+        return {k: _to_native(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_native(v) for v in value]
+    return value
+
+
 async def _fetch_oanda(client: httpx.AsyncClient, base: str, quote: str) -> float:
     # Your existing API base is used for aggregated quotes elsewhere; for periodic refresh, use a simple endpoint
     url = f"{config.OANDA_API_BASE}/rates/aggregated.json"
-    now_iso = _now_iso() + "Z"
+    current_instant = now_iso() + "Z"
     params = {
         "base": base,
         "quote": quote,
-        "start_time": now_iso,
-        "end_time": now_iso,
+        "start_time": current_instant,
+        "end_time": current_instant,
         "fields": "close",
     }
     headers = {"Accept": "application/json"}
@@ -64,54 +75,45 @@ async def _fetch_oanda(client: httpx.AsyncClient, base: str, quote: str) -> floa
     return float(midpoint)
 
 
-def _ddb_put(pair: str, rate: float) -> Dict:
-    """Write rate to DynamoDB using direct HTTP (bypasses boto3)"""
-    endpoint = (config.DDB_ENDPOINT or "http://dynamodb-local:8000").strip()
-    if "://" not in endpoint:
-        endpoint = f"http://{endpoint}"
-    
-    payload = {
-        "TableName": config.DDB_TABLE,
-        "Key": {"pair": {"S": pair}},
-        "UpdateExpression": "SET #r = :r, updated_at = :ts, #s = :src, manual = :m, version = if_not_exists(version, :zero) + :one",
-        "ExpressionAttributeNames": {"#r": "rate", "#s": "source"},
-        "ExpressionAttributeValues": {
-            ":r": {"N": str(Decimal(str(rate)))},
-            ":ts": {"S": _now_iso()},
-            ":src": {"S": "provider"},
-            ":m": {"BOOL": False},
-            ":zero": {"N": "0"},
-            ":one": {"N": "1"}
-        },
-        "ReturnValues": "ALL_NEW"
-    }
-    
-    headers = {
-        "X-Amz-Target": "DynamoDB_20120810.UpdateItem",
-        "Content-Type": "application/x-amz-json-1.0",
-    }
-    
-    # Synchronous httpx call (Celery task context)
-    with httpx.Client(timeout=5.0) as client:
-        resp = client.post(
-            endpoint.rstrip('/') + '/',
-            json=payload,
-            headers=headers,
+def _ddb_put(pair: str, rate: float) -> Dict[str, Any]:
+    """Write rate updates to DynamoDB using the boto3 resource API."""
+
+    if not _DDB_TABLE:
+        raise RuntimeError("DynamoDB table configuration is missing")
+
+    timestamp = now_iso()
+
+    try:
+        response = _DDB_TABLE.update_item(
+            Key={"pair": pair},
+            UpdateExpression=(
+                "SET #r = :r, updated_at = :ts, #s = :src, manual = :m, "
+                "version = if_not_exists(version, :zero) + :one"
+            ),
+            ExpressionAttributeNames={"#r": "rate", "#s": "source"},
+            ExpressionAttributeValues={
+                ":r": Decimal(str(rate)),
+                ":ts": timestamp,
+                ":src": "provider",
+                ":m": False,
+                ":zero": Decimal("0"),
+                ":one": Decimal("1"),
+            },
+            ReturnValues="ALL_NEW",
         )
-    resp.raise_for_status()
-    data = resp.json()
-    attrs = data["Attributes"]
-    
-    # Convert DynamoDB JSON back to plain dict
-    item = {
-        "pair": attrs["pair"]["S"],
-        "rate": float(attrs["rate"]["N"]),
-        "updated_at": attrs["updated_at"]["S"],
-        "source": attrs["source"]["S"],
-        "manual": attrs["manual"]["BOOL"],
-        "version": int(attrs["version"]["N"]),
+    except ClientError as exc:
+        raise RuntimeError(f"DynamoDB update failed for {pair}: {exc}") from exc
+
+    native = _to_native(response.get("Attributes", {}))
+
+    return {
+        "pair": native.get("pair", pair),
+        "rate": float(native.get("rate", rate)),
+        "updated_at": native.get("updated_at", timestamp),
+        "source": native.get("source", "provider"),
+        "manual": bool(native.get("manual", False)),
+        "version": int(native.get("version", 1)),
     }
-    return item
 
 
 @celery_app.task(bind=True, autoretry_for=(httpx.HTTPError,), retry_backoff=True,

@@ -1,16 +1,15 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from datetime import datetime
-from decimal import Decimal
+import asyncio
+import json
 import os
 import sys
-import httpx
-import json
-from typing import Optional, Any, Dict
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Dict, Optional
 
-import aioboto3
-from botocore.config import Config as BotoConfig
-from urllib.parse import urlparse
+import httpx
+from botocore.exceptions import ClientError
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
 # Add common module to path BEFORE importing shared utils/config
 common_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'common'))
@@ -19,7 +18,7 @@ if os.path.exists(common_path):
 else:
     sys.path.insert(0, '/app/common')
 
-from utils import get_redis, now_iso
+from utils import get_ddb_table, get_redis, now_iso, prepare_endpoint
 
 from middleware import add_cors_middleware
 from config import config
@@ -39,45 +38,6 @@ class ExchangeRate(BaseModel):
     rate: float
     timestamp: datetime
 
-def _to_native(value: Any) -> Any:
-    if isinstance(value, Decimal):
-        return int(value) if value % 1 == 0 else float(value)
-    if isinstance(value, dict):
-        return {k: _to_native(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_to_native(v) for v in value]
-    return value
-
-
-def _append_no_proxy(host: Optional[str]) -> None:
-    if not host:
-        return
-    host = host.strip()
-    if not host:
-        return
-    for key in ("NO_PROXY", "no_proxy"):
-        current = os.environ.get(key, "")
-        entries = [value.strip() for value in current.split(",") if value.strip()]
-        if host not in entries:
-            entries.append(host)
-            os.environ[key] = ",".join(entries)
-
-
-def _prepare_endpoint(url: Optional[str]) -> Optional[str]:
-    if not url:
-        return None
-    endpoint = url.strip()
-    if not endpoint:
-        return None
-    if "://" not in endpoint:
-        endpoint = f"http://{endpoint}"
-    parsed = urlparse(endpoint)
-    if parsed.hostname:
-        _append_no_proxy(parsed.hostname)
-        if parsed.port:
-            _append_no_proxy(f"{parsed.hostname}:{parsed.port}")
-    return endpoint
-
 
 def _to_native(value: Any) -> Any:
     if isinstance(value, Decimal):
@@ -94,13 +54,8 @@ _redis = get_redis(config.FOREX_REDIS_URL)
 _TTL = config.CACHE_TTL_SECONDS
 
 
-_DDB_ENDPOINT = _prepare_endpoint(config.DDB_ENDPOINT)
-_DDB_SESSION = aioboto3.Session(
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", "local"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", "local"),
-    region_name=config.AWS_REGION,
-)
-_DDB_CONFIG = BotoConfig(connect_timeout=2, read_timeout=5, retries={"max_attempts": 2, "mode": "standard"})
+_DDB_ENDPOINT = prepare_endpoint(config.DDB_ENDPOINT)
+_DDB_TABLE = get_ddb_table(config.AWS_REGION, _DDB_ENDPOINT, config.DDB_TABLE)
 
 
 def _cache_key(from_currency: str, to_currency: str, start_time: Optional[str], end_time: Optional[str]) -> str:
@@ -110,44 +65,46 @@ def _cache_key(from_currency: str, to_currency: str, start_time: Optional[str], 
 
 
 async def ddb_put_rate(pair: str, rate: float, source: str, manual: bool = False) -> Dict[str, Any]:
-    """Write the latest rate for a currency pair to DynamoDB using aioboto3."""
+    """Write the latest rate for a currency pair to DynamoDB using boto3."""
 
-    async with _DDB_SESSION.resource(
-        "dynamodb",
-        region_name=config.AWS_REGION,
-        endpoint_url=_DDB_ENDPOINT,
-        config=_DDB_CONFIG,
-    ) as dynamodb:
-        table = await dynamodb.Table(config.DDB_TABLE)
-        response = await table.update_item(
-            Key={"pair": pair},
-            UpdateExpression=(
-                "SET #r = :r, updated_at = :ts, #s = :src, manual = :m, "
-                "version = if_not_exists(version, :zero) + :one"
-            ),
-            ExpressionAttributeNames={"#r": "rate", "#s": "source"},
-            ExpressionAttributeValues={
-                ":r": Decimal(str(rate)),
-                ":ts": now_iso(),
-                ":src": source,
-                ":m": bool(manual),
-                ":zero": Decimal("0"),
-                ":one": Decimal("1"),
-            },
-            ReturnValues="ALL_NEW",
-        )
+    if not _DDB_TABLE:
+        raise RuntimeError("DynamoDB table configuration is missing")
 
-    attrs = _to_native(response.get("Attributes", {}))
+    def _update_sync() -> Dict[str, Any]:
+        timestamp = now_iso()
+        try:
+            response = _DDB_TABLE.update_item(
+                Key={"pair": pair},
+                UpdateExpression=(
+                    "SET #r = :r, updated_at = :ts, #s = :src, manual = :m, "
+                    "version = if_not_exists(version, :zero) + :one"
+                ),
+                ExpressionAttributeNames={"#r": "rate", "#s": "source"},
+                ExpressionAttributeValues={
+                    ":r": Decimal(str(rate)),
+                    ":ts": timestamp,
+                    ":src": source,
+                    ":m": bool(manual),
+                    ":zero": Decimal("0"),
+                    ":one": Decimal("1"),
+                },
+                ReturnValues="ALL_NEW",
+            )
+        except ClientError as exc:
+            raise RuntimeError(f"DynamoDB update failed for {pair}: {exc}") from exc
 
-    item: Dict[str, Any] = {
-        "pair": attrs.get("pair", pair),
-        "rate": attrs.get("rate", float(rate)),
-        "updated_at": attrs.get("updated_at", now_iso()),
-        "source": attrs.get("source", source),
-        "manual": bool(attrs.get("manual", manual)),
-        "version": int(attrs.get("version", 1)),
-    }
-    return item
+        native = _to_native(response.get("Attributes", {}))
+
+        return {
+            "pair": native.get("pair", pair),
+            "rate": native.get("rate", float(rate)),
+            "updated_at": native.get("updated_at", timestamp),
+            "source": native.get("source", source),
+            "manual": bool(native.get("manual", manual)),
+            "version": int(native.get("version", 1)),
+        }
+
+    return await asyncio.to_thread(_update_sync)
 
 
 @app.get("/health")

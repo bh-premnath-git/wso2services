@@ -1,21 +1,19 @@
-import redis
-import boto3
-import aioboto3
-from typing import Optional, AsyncIterator
-from datetime import datetime, timezone
-from urllib.parse import urlparse
-from botocore.config import Config as BotoConfig
-from contextlib import asynccontextmanager
 import os
+from datetime import datetime, timezone
+from typing import Optional
+from urllib.parse import urlparse
+
+import boto3
+from botocore.config import Config as BotoConfig
+import redis
 
 
-def _append_no_proxy(host: Optional[str]):
+def ensure_no_proxy(host: Optional[str]) -> None:
     """Ensure local hosts bypass corporate HTTP proxies."""
 
     if not host:
         return
 
-    # Normalize host component (strip surrounding whitespace)
     host = host.strip()
     if not host:
         return
@@ -29,93 +27,69 @@ def _append_no_proxy(host: Optional[str]):
         os.environ[key] = ",".join(entries)
 
 
-def get_redis(url: str) -> "redis.Redis":
-    """Create a Redis client from a URL (no side effects)."""
-    return redis.Redis.from_url(url, decode_responses=True)
+def prepare_endpoint(url: Optional[str]) -> Optional[str]:
+    """Normalize a DynamoDB endpoint URL and ensure proxy bypass for the host."""
 
-
-def _with_scheme(url: Optional[str]) -> Optional[str]:
-    """Ensure URL has a scheme (http:// or https://)"""
     if not url:
-        return url
-    url = url.strip()
-    return url if "://" in url else f"http://{url}"
+        return None
+
+    endpoint = url.strip()
+    if not endpoint:
+        return None
+
+    if "://" not in endpoint:
+        endpoint = f"http://{endpoint}"
+
+    parsed = urlparse(endpoint)
+    if parsed.hostname:
+        ensure_no_proxy(parsed.hostname)
+        if parsed.port:
+            ensure_no_proxy(f"{parsed.hostname}:{parsed.port}")
+
+    return endpoint
 
 
-def _credentials() -> dict[str, str]:
-    """Return explicit AWS credentials to avoid metadata lookups."""
+def _credential_kwargs() -> dict[str, str]:
+    """Return explicit AWS credential keyword arguments for boto3."""
 
-    return {
-        "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID", "local"),
-        "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY", "local"),
+    access_key = os.getenv("AWS_ACCESS_KEY_ID", "dummy_access_key")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "dummy_secret_key")
+    if not access_key or not secret_key:
+        raise RuntimeError("AWS credentials must be provided for DynamoDB access")
+
+    creds: dict[str, str] = {
+        "aws_access_key_id": access_key,
+        "aws_secret_access_key": secret_key,
     }
 
+    session_token = os.getenv("AWS_SESSION_TOKEN")
+    if session_token:
+        creds["aws_session_token"] = session_token
 
-def _boto_session(region: str) -> boto3.Session:
-    """Create boto3 session with explicit creds to avoid metadata lookups"""
-    return boto3.Session(region_name=region, **_credentials())
-
-
-def _aioboto_session(region: str) -> aioboto3.Session:
-    """Create aioboto3 session with explicit credentials."""
-
-    return aioboto3.Session(region_name=region, **_credentials())
-
-
-def get_ddb(region: str, endpoint: Optional[str] = None):
-    """Create a boto3 DynamoDB resource with short timeouts (no side effects)."""
-    endpoint = _with_scheme(endpoint)
-    parsed = urlparse(endpoint) if endpoint else None
-    if parsed:
-        _append_no_proxy(parsed.hostname)
-        # Also add host:port so urllib3 fully bypasses proxies when ports are used
-        if parsed.port:
-            _append_no_proxy(f"{parsed.hostname}:{parsed.port}")
-    sess = _boto_session(region)
-    return sess.resource(
-        "dynamodb",
-        endpoint_url=endpoint,
-        config=BotoConfig(
-            connect_timeout=2,
-            read_timeout=5,
-            retries={"max_attempts": 1, "mode": "standard"}
-        ),
-    )
+    return creds
 
 
 def get_ddb_table(region: str, endpoint: Optional[str], table_name: str):
-    """Convenience to return a DynamoDB Table handle."""
-    ddb = get_ddb(region, endpoint)
-    return ddb.Table(table_name)
+    """Return a DynamoDB table resource configured with short timeouts."""
 
-
-@asynccontextmanager
-async def get_async_ddb_table(
-    region: str, endpoint: Optional[str], table_name: str
-) -> AsyncIterator["aioboto3.resource.Table"]:
-    """Async context manager yielding an aioboto3 DynamoDB table."""
-
-    endpoint = _with_scheme(endpoint)
-    parsed = urlparse(endpoint) if endpoint else None
-    if parsed:
-        _append_no_proxy(parsed.hostname)
-        if parsed.port:
-            _append_no_proxy(f"{parsed.hostname}:{parsed.port}")
-
-    session = _aioboto_session(region)
-    resource = session.resource(
+    kwargs = _credential_kwargs()
+    resource = boto3.resource(
         "dynamodb",
+        region_name=region,
         endpoint_url=endpoint,
         config=BotoConfig(
             connect_timeout=2,
             read_timeout=5,
             retries={"max_attempts": 2, "mode": "standard"},
         ),
+        **kwargs,
     )
+    return resource.Table(table_name)
 
-    async with resource as dynamodb:
-        table = dynamodb.Table(table_name)
-        yield table
+
+def get_redis(url: str) -> "redis.Redis":
+    """Create a Redis client from a URL (no side effects)."""
+    return redis.Redis.from_url(url, decode_responses=True)
 
 
 def now_iso() -> str:
