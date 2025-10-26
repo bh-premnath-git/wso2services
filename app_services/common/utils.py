@@ -7,6 +7,26 @@ from botocore.config import Config as BotoConfig
 import os
 
 
+def _append_no_proxy(host: Optional[str]):
+    """Ensure local hosts bypass corporate HTTP proxies."""
+
+    if not host:
+        return
+
+    # Normalize host component (strip surrounding whitespace)
+    host = host.strip()
+    if not host:
+        return
+
+    for key in ("NO_PROXY", "no_proxy"):
+        current = os.environ.get(key, "")
+        entries = [value.strip() for value in current.split(",") if value.strip()]
+        if host in entries:
+            continue
+        entries.append(host)
+        os.environ[key] = ",".join(entries)
+
+
 def get_redis(url: str) -> "redis.Redis":
     """Create a Redis client from a URL (no side effects)."""
     return redis.Redis.from_url(url, decode_responses=True)
@@ -32,6 +52,12 @@ def _boto_session(region: str) -> boto3.Session:
 def get_ddb(region: str, endpoint: Optional[str] = None):
     """Create a boto3 DynamoDB resource with short timeouts (no side effects)."""
     endpoint = _with_scheme(endpoint)
+    parsed = urlparse(endpoint) if endpoint else None
+    if parsed:
+        _append_no_proxy(parsed.hostname)
+        # Also add host:port so urllib3 fully bypasses proxies when ports are used
+        if parsed.port:
+            _append_no_proxy(f"{parsed.hostname}:{parsed.port}")
     sess = _boto_session(region)
     return sess.resource(
         "dynamodb",
