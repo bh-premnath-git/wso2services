@@ -59,6 +59,9 @@ class Config:
 
     # Redis and DynamoDB for forex service and background jobs
     AWS_REGION: str = os.getenv("AWS_REGION", "ap-south-1")
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "dummy_access_key")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "dummy_secret_key")
+    AWS_SESSION_TOKEN: Optional[str] = os.getenv("AWS_SESSION_TOKEN")
     DDB_TABLE: str = os.getenv("DDB_TABLE", "fx_rates")
     DDB_ENDPOINT: str = os.getenv("DDB_ENDPOINT", "http://dynamodb-local:8000")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "redis-secret")
