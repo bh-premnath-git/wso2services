@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 import os
 import sys
@@ -38,6 +38,15 @@ class ExchangeRate(BaseModel):
     to_currency: str
     rate: float
     timestamp: datetime
+
+def _to_native(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return int(value) if value % 1 == 0 else float(value)
+    if isinstance(value, dict):
+        return {k: _to_native(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_native(v) for v in value]
+    return value
 
 
 def _append_no_proxy(host: Optional[str]) -> None:
