@@ -1,9 +1,11 @@
 import redis
 import boto3
-from typing import Optional
+import aioboto3
+from typing import Optional, AsyncIterator
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from botocore.config import Config as BotoConfig
+from contextlib import asynccontextmanager
 import os
 
 
@@ -40,13 +42,24 @@ def _with_scheme(url: Optional[str]) -> Optional[str]:
     return url if "://" in url else f"http://{url}"
 
 
+def _credentials() -> dict[str, str]:
+    """Return explicit AWS credentials to avoid metadata lookups."""
+
+    return {
+        "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID", "local"),
+        "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY", "local"),
+    }
+
+
 def _boto_session(region: str) -> boto3.Session:
     """Create boto3 session with explicit creds to avoid metadata lookups"""
-    return boto3.Session(
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", "local"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", "local"),
-        region_name=region,
-    )
+    return boto3.Session(region_name=region, **_credentials())
+
+
+def _aioboto_session(region: str) -> aioboto3.Session:
+    """Create aioboto3 session with explicit credentials."""
+
+    return aioboto3.Session(region_name=region, **_credentials())
 
 
 def get_ddb(region: str, endpoint: Optional[str] = None):
@@ -74,6 +87,35 @@ def get_ddb_table(region: str, endpoint: Optional[str], table_name: str):
     """Convenience to return a DynamoDB Table handle."""
     ddb = get_ddb(region, endpoint)
     return ddb.Table(table_name)
+
+
+@asynccontextmanager
+async def get_async_ddb_table(
+    region: str, endpoint: Optional[str], table_name: str
+) -> AsyncIterator["aioboto3.resource.Table"]:
+    """Async context manager yielding an aioboto3 DynamoDB table."""
+
+    endpoint = _with_scheme(endpoint)
+    parsed = urlparse(endpoint) if endpoint else None
+    if parsed:
+        _append_no_proxy(parsed.hostname)
+        if parsed.port:
+            _append_no_proxy(f"{parsed.hostname}:{parsed.port}")
+
+    session = _aioboto_session(region)
+    resource = session.resource(
+        "dynamodb",
+        endpoint_url=endpoint,
+        config=BotoConfig(
+            connect_timeout=2,
+            read_timeout=5,
+            retries={"max_attempts": 2, "mode": "standard"},
+        ),
+    )
+
+    async with resource as dynamodb:
+        table = dynamodb.Table(table_name)
+        yield table
 
 
 def now_iso() -> str:

@@ -32,30 +32,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.14 1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Go (optional - uncomment if needed)
-# RUN wget -q https://go.dev/dl/go1.23.2.linux-amd64.tar.gz \
-#     && tar -C /usr/local -xzf go1.23.2.linux-amd64.tar.gz \
-#     && rm go1.23.2.linux-amd64.tar.gz
-# ENV PATH="/usr/local/go/bin:${PATH}"
-
-# Install Rust (optional - uncomment if needed)
-# RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-#     && . $HOME/.cargo/env
-
-# Install Node.js (optional - uncomment if needed)
-# RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-#     && apt-get install -y nodejs \
-#     && rm -rf /var/lib/apt/lists/*
-
 # Set working directory
 WORKDIR /app
 
 # Copy common dependencies first
 COPY ./common /app/common
 
-# Copy service requirements
-COPY ./payment_service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy service requirements and install
+COPY ./payment_service/requirements.txt /app/payment_service/requirements.txt
+RUN pip install --no-cache-dir -r payment_service/requirements.txt
 
 # Copy application code
 COPY ./payment_service/app /app/app

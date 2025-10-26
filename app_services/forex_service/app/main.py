@@ -1,13 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 import os
 import sys
 import httpx
 import json
-from typing import Optional
-from botocore.config import Config
+from typing import Optional, Any, Dict
+from botocore.exceptions import ClientError
 
 # Add common module to path BEFORE importing shared utils/config
 common_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'common'))
@@ -16,7 +16,7 @@ if os.path.exists(common_path):
 else:
     sys.path.insert(0, '/app/common')
 
-from utils import get_redis, get_ddb_table, now_iso
+from utils import get_redis, get_async_ddb_table, now_iso
 
 from middleware import add_cors_middleware
 from config import config
@@ -36,6 +36,15 @@ class ExchangeRate(BaseModel):
     rate: float
     timestamp: datetime
 
+def _to_native(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return int(value) if value % 1 == 0 else float(value)
+    if isinstance(value, dict):
+        return {k: _to_native(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_native(v) for v in value]
+    return value
+
 
 # Redis cache (shared factory)
 _redis = get_redis(config.FOREX_REDIS_URL)
@@ -48,39 +57,38 @@ def _cache_key(from_currency: str, to_currency: str, start_time: Optional[str], 
     return f"fx:rate:{from_currency.upper()}-{to_currency.upper()}:{f}:{t}"
 
 
-# DynamoDB (latest rate per pair) - lazy loaded to avoid import-time connection
-def _get_table():
-    return get_ddb_table(config.AWS_REGION, config.DDB_ENDPOINT, config.DDB_TABLE)
+async def ddb_put_rate(pair: str, rate: float, source: str, manual: bool = False) -> Dict[str, Any]:
+    """Write the latest rate for a currency pair to DynamoDB asynchronously."""
 
+    async with get_async_ddb_table(
+        config.AWS_REGION, config.DDB_ENDPOINT, config.DDB_TABLE
+    ) as table:
+        try:
+            response = await table.update_item(
+                Key={"pair": pair},
+                UpdateExpression=(
+                    "SET #r = :r, updated_at = :ts, #s = :src, manual = :m, "
+                    "version = if_not_exists(version, :zero) + :one"
+                ),
+                ExpressionAttributeNames={"#r": "rate", "#s": "source"},
+                ExpressionAttributeValues={
+                    ":r": Decimal(str(rate)),
+                    ":ts": now_iso(),
+                    ":src": source,
+                    ":m": bool(manual),
+                    ":zero": Decimal("0"),
+                    ":one": Decimal("1"),
+                },
+                ReturnValues="ALL_NEW",
+            )
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            raise RuntimeError(f"DynamoDB update failed ({code})") from exc
 
-def ddb_put_rate(pair: str, rate: float, source: str, manual: bool = False):
-    """Write the latest rate for a currency pair to DynamoDB using boto3."""
-
-    table = _get_table()
-    response = table.update_item(
-        Key={"pair": pair},
-        UpdateExpression=(
-            "SET #r = :r, updated_at = :ts, #s = :src, manual = :m, "
-            "version = if_not_exists(version, :zero) + :one"
-        ),
-        ExpressionAttributeNames={"#r": "rate", "#s": "source"},
-        ExpressionAttributeValues={
-            ":r": Decimal(str(rate)),
-            ":ts": now_iso(),
-            ":src": source,
-            ":m": bool(manual),
-            ":zero": Decimal("0"),
-            ":one": Decimal("1"),
-        },
-        ReturnValues="ALL_NEW",
-    )
-
-    attrs = response.get("Attributes", {})
-
-    # Convert DynamoDB types to plain Python primitives for the API response
-    item = {
+    attrs = _to_native(response.get("Attributes", {}))
+    item: Dict[str, Any] = {
         "pair": attrs.get("pair", pair),
-        "rate": float(attrs.get("rate", Decimal(str(rate)))),
+        "rate": attrs.get("rate", float(rate)),
         "updated_at": attrs.get("updated_at", now_iso()),
         "source": attrs.get("source", source),
         "manual": bool(attrs.get("manual", manual)),
@@ -203,14 +211,24 @@ async def write_rate(pair: str, body: RateWrite):
     """
     try:
         pair_up = pair.upper()
-        item = ddb_put_rate(pair_up, rate=body.rate, source="user", manual=True)
+        item = await ddb_put_rate(pair_up, rate=body.rate, source="user", manual=True)
         # Build a minimal payload for cache consumers of GET without time filters
         base, quote = pair_up[:3], pair_up[3:]
+        updated_at = item.get("updated_at")
+        if isinstance(updated_at, str):
+            try:
+                ts_dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            except ValueError:
+                ts_dt = datetime.utcnow()
+        elif isinstance(updated_at, datetime):
+            ts_dt = updated_at
+        else:
+            ts_dt = datetime.utcnow()
         payload = ExchangeRate(
             from_currency=base,
             to_currency=quote,
             rate=float(item["rate"]),
-            timestamp=datetime.fromisoformat(item["updated_at"]) if isinstance(item.get("updated_at"), str) else datetime.utcnow(),
+            timestamp=ts_dt,
         )
         try:
             _redis.setex(_cache_key(base, quote, None, None), _TTL, payload.model_dump_json())
