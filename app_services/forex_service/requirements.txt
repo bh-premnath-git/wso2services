@@ -10,6 +10,7 @@ httpx>=0.28.0
 # Database Clients
 psycopg[binary]>=3.2.0  # PostgreSQL
 aioboto3>=13.2.0  # DynamoDB
+boto3>=1.35.0     # Used by service code
 redis[hiredis]>=5.2.0  # Redis
 aiokafka>=0.11.0  # Redpanda/Kafka
 
@@ -24,6 +25,9 @@ python-multipart>=0.0.17
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-dotenv>=1.0.0
+
+# Background jobs
+celery[redis]>=5.4.0
 
 # Testing (optional)
 pytest>=8.3.0

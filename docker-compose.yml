@@ -61,13 +61,19 @@ services:
     container_name: dynamodb-local
     ports:
       - "8000:8000"
-    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /data"
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data"
     volumes:
-      - dynamodb-data:/data
+      - dynamodb-data:/home/dynamodblocal/data
     working_dir: /home/dynamodblocal
     networks:
       - payment-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS -X POST http://localhost:8000/ -H 'X-Amz-Target: DynamoDB_20120810.ListTables' -H 'Content-Type: application/x-amz-json-1.0' -d '{}' >/dev/null"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
 
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -170,6 +176,11 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_db
       - REDIS_URL=redis://:redis-secret@redis:6379/0
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - NO_PROXY=localhost,127.0.0.1,dynamodb-local,.local,.internal
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - AWS_DEFAULT_REGION=ap-south-1
+      - AWS_EC2_METADATA_DISABLED=true
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=forex-service
@@ -181,7 +192,7 @@ services:
       redpanda:
         condition: service_healthy
       dynamodb-local:
-        condition: service_started
+        condition: service_healthy
       otel-collector:
         condition: service_started
     networks:
@@ -189,6 +200,78 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  fx-worker:
+    build:
+      context: ./app_services
+      dockerfile: forex_service/Dockerfile
+    container_name: fx-worker
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis-secret}
+      - REDIS_BROKER_URL=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/0
+      - REDIS_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/0
+      - FOREX_REDIS_URL=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/1
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - DDB_TABLE=${DDB_TABLE:-fx_rates}
+      - DDB_ENDPOINT=${DDB_ENDPOINT:-http://dynamodb-local:8000}
+      - NO_PROXY=localhost,127.0.0.1,dynamodb-local,.local,.internal
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - OANDA_API_BASE=${OANDA_API_BASE:-https://exchange-rates-api.oanda.com/v2}
+      - OANDA_API_KEY=${OANDA_API_KEY:-}
+      - PAIRS_CSV=${PAIRS_CSV:-USDINR,EURINR,GBPINR}
+    depends_on:
+      redis:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app.celery_app inspect ping -t 5 | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  fx-beat:
+    build:
+      context: ./app_services
+      dockerfile: forex_service/Dockerfile
+    container_name: fx-beat
+    command: ["celery", "-A", "app.celery_app.celery_app", "beat", "--loglevel=info", "--pidfile=/tmp/celerybeat.pid", "--schedule=/tmp/celerybeat-schedule"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis-secret}
+      - REDIS_BROKER_URL=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/0
+      - REDIS_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/0
+      - FOREX_REDIS_URL=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/1
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - DDB_TABLE=${DDB_TABLE:-fx_rates}
+      - DDB_ENDPOINT=${DDB_ENDPOINT:-http://dynamodb-local:8000}
+      - NO_PROXY=localhost,127.0.0.1,dynamodb-local,.local,.internal
+      - OANDA_API_BASE=${OANDA_API_BASE:-https://exchange-rates-api.oanda.com/v2}
+      - OANDA_API_KEY=${OANDA_API_KEY:-}
+      - PAIRS_CSV=${PAIRS_CSV:-USDINR,EURINR,GBPINR}
+    depends_on:
+      redis:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -E 'celery( |.* )beat' | grep -v grep >/dev/null"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -14,16 +14,20 @@ create_admin_account = true
 type = "database_unique_id"
 
 [database.apim_db]
-type = "h2"
-url = "jdbc:h2:./repository/database/WSO2AM_DB;DB_CLOSE_ON_EXIT=FALSE"
+type = "postgre"
+url = "jdbc:postgresql://postgres:5432/apim_db"
 username = "wso2carbon"
 password = "wso2carbon"
+driver = "org.postgresql.Driver"
+validationQuery = "SELECT 1"
 
 [database.shared_db]
-type = "h2"
-url = "jdbc:h2:./repository/database/WSO2SHARED_DB;DB_CLOSE_ON_EXIT=FALSE"
+type = "postgre"
+url = "jdbc:postgresql://postgres:5432/shared_db"
 username = "wso2carbon"
 password = "wso2carbon"
+driver = "org.postgresql.Driver"
+validationQuery = "SELECT 1"
 
 [keystore.tls]
 file_name =  "wso2carbon.jks"
@@ -138,8 +142,8 @@ enable_lightweight_apikey_generation = true
 #claims_extractor_impl = "org.wso2.carbon.apimgt.impl.token.ExtendedDefaultClaimsRetriever"
 #use_sha256_hash = false
 
-#[apim.oauth_config]
-#enable_outbound_auth_header = false
+[apim.oauth_config]
+enable_outbound_auth_header = true
 #auth_header = "Authorization"
 #revoke_endpoint = "https://localhost:${https.nio.port}/revoke"
 #enable_token_encryption = false

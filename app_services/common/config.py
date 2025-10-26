@@ -57,6 +57,17 @@ class Config:
     OANDA_API_BASE: str = os.getenv("OANDA_API_BASE", "https://exchange-rates-api.oanda.com/v2")
     OANDA_API_KEY: str = os.getenv("OANDA_API_KEY", "")
 
+    # Redis and DynamoDB for forex service and background jobs
+    AWS_REGION: str = os.getenv("AWS_REGION", "ap-south-1")
+    DDB_TABLE: str = os.getenv("DDB_TABLE", "fx_rates")
+    DDB_ENDPOINT: str = os.getenv("DDB_ENDPOINT", "http://dynamodb-local:8000")
+    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "redis-secret")
+    FOREX_REDIS_URL: str = os.getenv("FOREX_REDIS_URL", f"redis://:{os.getenv('REDIS_PASSWORD', 'redis-secret')}@redis:6379/1")
+    REDIS_BROKER_URL: str = os.getenv("REDIS_BROKER_URL", f"redis://:{os.getenv('REDIS_PASSWORD', 'redis-secret')}@redis:6379/0")
+    REDIS_RESULT_BACKEND: str = os.getenv("REDIS_RESULT_BACKEND", f"redis://:{os.getenv('REDIS_PASSWORD', 'redis-secret')}@redis:6379/0")
+    CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", str(5 * 60 * 60 - 600)))
+    PAIRS_CSV: str = os.getenv("PAIRS_CSV", "USDINR,EURINR,GBPINR")
+
     @classmethod
     def validate_smtp_config(cls) -> bool:
         """Validate that required SMTP configuration is present"""
