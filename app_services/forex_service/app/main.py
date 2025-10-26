@@ -54,52 +54,37 @@ def _get_table():
 
 
 def ddb_put_rate(pair: str, rate: float, source: str, manual: bool = False):
-    """Write rate to DynamoDB using direct HTTP (bypasses boto3 entirely)"""
-    endpoint = (config.DDB_ENDPOINT or "http://dynamodb-local:8000").strip()
-    if "://" not in endpoint:
-        endpoint = f"http://{endpoint}"
-    
-    # DynamoDB UpdateItem request via HTTP
-    payload = {
-        "TableName": config.DDB_TABLE,
-        "Key": {"pair": {"S": pair}},
-        "UpdateExpression": "SET #r = :r, updated_at = :ts, #s = :src, manual = :m, version = if_not_exists(version, :zero) + :one",
-        "ExpressionAttributeNames": {"#r": "rate", "#s": "source"},
-        "ExpressionAttributeValues": {
-            ":r": {"N": str(Decimal(str(rate)))},
-            ":ts": {"S": now_iso()},
-            ":src": {"S": source},
-            ":m": {"BOOL": bool(manual)},
-            ":zero": {"N": "0"},
-            ":one": {"N": "1"}
+    """Write the latest rate for a currency pair to DynamoDB using boto3."""
+
+    table = _get_table()
+    response = table.update_item(
+        Key={"pair": pair},
+        UpdateExpression=(
+            "SET #r = :r, updated_at = :ts, #s = :src, manual = :m, "
+            "version = if_not_exists(version, :zero) + :one"
+        ),
+        ExpressionAttributeNames={"#r": "rate", "#s": "source"},
+        ExpressionAttributeValues={
+            ":r": Decimal(str(rate)),
+            ":ts": now_iso(),
+            ":src": source,
+            ":m": bool(manual),
+            ":zero": Decimal("0"),
+            ":one": Decimal("1"),
         },
-        "ReturnValues": "ALL_NEW"
-    }
-    
-    headers = {
-        "X-Amz-Target": "DynamoDB_20120810.UpdateItem",
-        "Content-Type": "application/x-amz-json-1.0",
-    }
-    
-    # Use httpx with tight timeout (no boto3 delays)
-    resp = httpx.post(
-        endpoint.rstrip('/') + '/',
-        json=payload,
-        headers=headers,
-        timeout=5.0,
+        ReturnValues="ALL_NEW",
     )
-    resp.raise_for_status()
-    data = resp.json()
-    attrs = data["Attributes"]
-    
-    # Convert DynamoDB JSON back to plain dict
+
+    attrs = response.get("Attributes", {})
+
+    # Convert DynamoDB types to plain Python primitives for the API response
     item = {
-        "pair": attrs["pair"]["S"],
-        "rate": float(attrs["rate"]["N"]),
-        "updated_at": attrs["updated_at"]["S"],
-        "source": attrs["source"]["S"],
-        "manual": attrs["manual"]["BOOL"],
-        "version": int(attrs["version"]["N"]),
+        "pair": attrs.get("pair", pair),
+        "rate": float(attrs.get("rate", Decimal(str(rate)))),
+        "updated_at": attrs.get("updated_at", now_iso()),
+        "source": attrs.get("source", source),
+        "manual": bool(attrs.get("manual", manual)),
+        "version": int(attrs.get("version", 1)),
     }
     return item
 
