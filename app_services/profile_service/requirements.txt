@@ -1,36 +1,24 @@
+-r ../common/requirements.txt
+
 # FastAPI Web Framework
 fastapi>=0.119.0
 uvicorn[standard]>=0.32.0
-pydantic>=2.10.0
-pydantic-settings>=2.6.0
 email-validator>=2.2.0  # Required for EmailStr validation
-
-# HTTP Client
-httpx>=0.28.0
 
 # Database Clients
 psycopg[binary]>=3.2.0  # PostgreSQL
 aioboto3>=13.2.0  # DynamoDB
-redis[hiredis]>=5.2.0  # Redis
 aiokafka>=0.11.0  # Redpanda/Kafka
 
 # Observability
-opentelemetry-api>=1.28.0
-opentelemetry-sdk>=1.28.0
 opentelemetry-instrumentation-fastapi>=0.49b0
 opentelemetry-exporter-otlp>=1.28.0
 
 # Utilities
 python-multipart>=0.0.17
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-python-dotenv>=1.0.0
-cffi>=1.17.0  # Required for cryptography on Python 3.14
-cryptography>=43.0.0  # Python 3.14 compatible
-PyJWT>=2.9.0  # JWT token decoding for auth (Python 3.14 compatible)
 aiosmtplib>=3.0.0  # Async email sending
 
 # Testing (optional)
 pytest>=8.3.0
 pytest-asyncio>=0.24.0
-httpx>=0.28.0
+

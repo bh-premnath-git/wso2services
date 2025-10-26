@@ -38,9 +38,9 @@ WORKDIR /app
 # Copy common dependencies first
 COPY ./common /app/common
 
-# Copy service requirements
-COPY ./forex_service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy service requirements and install
+COPY ./forex_service/requirements.txt /app/forex_service/requirements.txt
+RUN pip install --no-cache-dir -r forex_service/requirements.txt
 
 # Copy application code
 COPY ./forex_service/app /app/app
