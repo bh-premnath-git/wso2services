@@ -1,0 +1,532 @@
+services:
+  postgres:
+    image: postgres:18.0
+    container_name: postgres-wso2
+    env_file:
+      - .env
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_MAX_CONNECTIONS: ${POSTGRES_MAX_CONNECTIONS}
+    command: >
+      postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS}
+               -c shared_buffers=256MB
+    volumes:
+      - ./conf/postgres/scripts:/docker-entrypoint-initdb.d:ro
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [ payment-network ]
+    
+  wso2am:
+    build:
+      context: ./wso2am
+      dockerfile: Dockerfile
+    container_name: wso2am
+    env_file:
+      - .env
+    ports:
+      - "9443:9443"
+      - "8280:8280"
+      - "8243:8243"
+      - "9999:9999"
+      - "11111:11111"
+    environment:
+      - JAVA_OPTS=-Xms512m -Xmx2048m
+    volumes:
+      - ./wso2am/lib/postgresql-42.7.4.jar:/home/wso2carbon/wso2am-4.5.0/repository/components/lib/postgresql-42.7.4.jar
+      - ./wso2am/repository/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml
+      - ./wso2am/repository/resources/security/tokenstore/:/home/wso2carbon/wso2am-4.5.0/repository/resources/security/tokenstore/
+      - ./wso2am/repository/resources/security/wso2carbon.jks:/home/wso2carbon/wso2am-4.5.0/repository/resources/security/wso2carbon.jks
+      - ./wso2am/repository/resources/security/client-truststore.jks:/home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      payment-network:
+        aliases: [ am.local ]
+
+  wso2is:
+    build:
+      context: ./wso2is
+      dockerfile: Dockerfile
+    container_name: wso2is
+    env_file:
+      - .env
+    ports:
+      - "9444:9443"
+      - "9764:9763"
+      - "5005:5005"
+    environment:
+      - JAVA_OPTS=-Xms512m -Xmx2048m
+    volumes:
+      - ./wso2is/lib/postgresql-42.7.4.jar:/home/wso2carbon/wso2is-7.1.0/repository/components/lib/postgresql-42.7.4.jar
+      - ./wso2is/repository/conf/deployment.toml:/home/wso2carbon/wso2is-7.1.0/repository/conf/deployment.toml
+      - ./wso2is/repository/components/dropins/wso2is.notification.event.handlers-2.0.8.jar:/home/wso2carbon/wso2is-7.1.0/repository/components/dropins/wso2is.notification.event.handlers-2.0.8.jar
+      - ./wso2is/repository/resources/security/tokenstore/:/home/wso2carbon/wso2is-7.1.0/repository/resources/security/tokenstore/
+      - ./wso2is/repository/resources/security/wso2carbon.p12:/home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12
+      - ./wso2is/repository/resources/security/client-truststore.p12:/home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      payment-network:
+        aliases: [ is.local ]
+
+  mkcert:
+    image: alpine/mkcert:latest
+    container_name: mkcert
+    volumes:
+      - ./certs:/certs
+    working_dir: /certs
+    networks: [ payment-network ]
+
+
+  dynamodb-init:
+    image: python:3.11-slim
+    container_name: dynamodb-init
+    volumes:
+      - ./app_scripts:/scripts
+    command: /bin/bash /scripts/init_dynamodb.sh
+    environment:
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - AWS_DEFAULT_REGION=ap-south-1
+      - AWS_EC2_METADATA_DISABLED=true
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+    networks: [ payment-network ]
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: dynamodb-local
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    working_dir: /home/dynamodblocal
+    networks: [ payment-network ]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS -X POST http://localhost:8000/ -H 'X-Amz-Target: DynamoDB_20120810.ListTables' -H 'Content-Type: application/x-amz-json-1.0' -d '{}' >/dev/null"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks: [ payment-network ]
+
+  otel-collector:
+    build:
+      context: ./otel
+      dockerfile: Dockerfile
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel/collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4318:4318"
+      - "8888:8888"
+      - "13133:13133"
+    depends_on:
+      - jaeger
+    networks: [ payment-network ]
+
+  redis:
+    image: redis:8.2.2-alpine3.22
+    container_name: redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis-secret}"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks: [ payment-network ]
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redpanda:
+    image: redpandadata/redpanda:v25.2.9
+    container_name: redpanda
+    command:
+      - redpanda start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - "PLAINTEXT://0.0.0.0:9092"
+      - --advertise-kafka-addr
+      - "PLAINTEXT://redpanda:9092"
+      - --rpc-addr
+      - "0.0.0.0:33145"
+      - --advertise-rpc-addr
+      - "redpanda:33145"
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+      - "8082:8082"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    networks: [ payment-network ]
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+  
+# Application Services
+  forex-service:
+    build:
+      context: ./app_services
+      dockerfile: forex_service/Dockerfile
+    container_name: forex-service
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=forex_service
+      - SERVICE_PORT=8001
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_db
+      - REDIS_URL=redis://:redis-secret@redis:6379/0
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - NO_PROXY=localhost,127.0.0.1,dynamodb-local,.local,.internal
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - AWS_DEFAULT_REGION=ap-south-1
+      - AWS_EC2_METADATA_DISABLED=true
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=forex-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  fx-worker:
+    build:
+      context: ./app_services
+      dockerfile: forex_service/Dockerfile
+    container_name: fx-worker
+    command: ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis-secret}
+      - REDIS_BROKER_URL=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/0
+      - REDIS_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/0
+      - FOREX_REDIS_URL=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/1
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - DDB_TABLE=${DDB_TABLE:-fx_rates}
+      - DDB_ENDPOINT=${DDB_ENDPOINT:-http://dynamodb-local:8000}
+      - NO_PROXY=localhost,127.0.0.1,dynamodb-local,.local,.internal
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - OANDA_API_BASE=${OANDA_API_BASE:-https://exchange-rates-api.oanda.com/v2}
+      - OANDA_API_KEY=${OANDA_API_KEY:-}
+      - PAIRS_CSV=${PAIRS_CSV:-USDINR,EURINR,GBPINR}
+    depends_on:
+      redis:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app.celery_app inspect ping -t 5 | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  fx-beat:
+    build:
+      context: ./app_services
+      dockerfile: forex_service/Dockerfile
+    container_name: fx-beat
+    command: ["celery", "-A", "app.celery_app.celery_app", "beat", "--loglevel=info", "--pidfile=/tmp/celerybeat.pid", "--schedule=/tmp/celerybeat-schedule"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis-secret}
+      - REDIS_BROKER_URL=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/0
+      - REDIS_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/0
+      - FOREX_REDIS_URL=redis://:${REDIS_PASSWORD:-redis-secret}@redis:6379/1
+      - AWS_REGION=${AWS_REGION:-ap-south-1}
+      - DDB_TABLE=${DDB_TABLE:-fx_rates}
+      - DDB_ENDPOINT=${DDB_ENDPOINT:-http://dynamodb-local:8000}
+      - NO_PROXY=localhost,127.0.0.1,dynamodb-local,.local,.internal
+      - OANDA_API_BASE=${OANDA_API_BASE:-https://exchange-rates-api.oanda.com/v2}
+      - OANDA_API_KEY=${OANDA_API_KEY:-}
+      - PAIRS_CSV=${PAIRS_CSV:-USDINR,EURINR,GBPINR}
+    depends_on:
+      redis:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -E 'celery( |.* )beat' | grep -v grep >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  ledger-service:
+    build:
+      context: ./app_services
+      dockerfile: ledger_service/Dockerfile
+    container_name: ledger-service
+    ports:
+      - "8002:8002"
+    environment:
+      - SERVICE_NAME=ledger_service
+      - SERVICE_PORT=8002
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ledger_db
+      - REDIS_URL=redis://:redis-secret@redis:6379/1
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=ledger-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  payment-service:
+    build:
+      context: ./app_services
+      dockerfile: payment_service/Dockerfile
+    container_name: payment-service
+    ports:
+      - "8003:8003"
+    environment:
+      - SERVICE_NAME=payment_service
+      - SERVICE_PORT=8003
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/payment_db
+      - REDIS_URL=redis://:redis-secret@redis:6379/2
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=payment-service
+      - FOREX_SERVICE_URL=http://forex-service:8001
+      - LEDGER_SERVICE_URL=http://ledger-service:8002
+      - WALLET_SERVICE_URL=http://wallet-service:8006
+      - RULE_ENGINE_SERVICE_URL=http://rule-engine-service:8005
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+      forex-service:
+        condition: service_started
+      ledger-service:
+        condition: service_started
+      wallet-service:
+        condition: service_started
+      rule-engine-service:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  profile-service:
+    build:
+      context: ./app_services
+      dockerfile: profile_service/Dockerfile
+    container_name: profile-service
+    ports:
+      - "8004:8004"
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=profile_service
+      - SERVICE_PORT=8004
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/profile_db
+      - REDIS_URL=redis://:redis-secret@redis:6379/3
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=profile-service
+      - WSO2_IS_URL=https://wso2is:9443
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+      wso2is:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  rule-engine-service:
+    build:
+      context: ./app_services
+      dockerfile: rule_engine_service/Dockerfile
+    container_name: rule-engine-service
+    ports:
+      - "8005:8005"
+    environment:
+      - SERVICE_NAME=rule_engine_service
+      - SERVICE_PORT=8005
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rule_engine_db
+      - REDIS_URL=redis://:redis-secret@redis:6379/4
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=rule-engine-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  wallet-service:
+    build:
+      context: ./app_services
+      dockerfile: wallet_service/Dockerfile
+    container_name: wallet-service
+    ports:
+      - "8006:8006"
+    environment:
+      - SERVICE_NAME=wallet_service
+      - SERVICE_PORT=8006
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/wallet_db
+      - REDIS_URL=redis://:redis-secret@redis:6379/5
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=wallet-service
+      - LEDGER_SERVICE_URL=http://ledger-service:8002
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+      ledger-service:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+
+networks:
+  payment-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  dynamodb-data:
+  redis-data:
+  redpanda-data:
