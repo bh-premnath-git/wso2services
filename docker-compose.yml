@@ -212,6 +212,7 @@ services:
       - SERVICE_PORT=8001
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_db
       - REDIS_URL=redis://:redis-secret@redis:6379/0
+      - FOREX_REDIS_URL=redis://:redis-secret@redis:6379/1
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
       - NO_PROXY=localhost,127.0.0.1,dynamodb-local,.local,.internal
       - AWS_ACCESS_KEY_ID=local

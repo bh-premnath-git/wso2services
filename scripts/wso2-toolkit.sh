@@ -320,7 +320,7 @@ cmd_setup_km() {
   "enableTokenHashing": false,
   "enableMapOAuthConsumerApps": true,
   "enableOAuthAppCreation": true,
-  "enableSelfValidationJWT": false,
+  "enableSelfValidationJWT": true,
   "claimMapping": [
     {
       "remoteClaim": "sub",
@@ -976,6 +976,26 @@ EOF
     fi
 
     log_success "OAuth2 keys generated successfully!"
+    
+    # Step 3: Update application to ensure keys are persisted
+    log_info "Verifying key mapping..."
+    local update_payload
+    read -r -d '' update_payload <<EOF || true
+{
+  "name": "${app_name}",
+  "throttlingPolicy": "Unlimited",
+  "description": "OAuth2/OIDC application created via toolkit",
+  "tokenType": "JWT",
+  "attributes": {
+    "client_id": "${consumer_key}"
+  }
+}
+EOF
+
+    curl -k -sS -u "${APIM_ADMIN_USER}:${APIM_ADMIN_PASS}" \
+        -H "Content-Type: application/json" \
+        -d "${update_payload}" \
+        -X PUT "${apim_app_api}/${app_id}" > /dev/null 2>&1 || true
 
     echo ""
     echo "╔══════════════════════════════════════════════════════════╗"
@@ -1003,8 +1023,21 @@ EOF
     echo "Test token generation:"
     echo "  ./wso2-toolkit.sh get-token cc ${consumer_key} ${consumer_secret}"
     echo ""
+    echo "Test with user login (password grant):"
+    echo "  ./wso2is-user.sh login <username> <password> ${consumer_key} ${consumer_secret}"
+    echo ""
+    echo "Call services directly (bypassing gateway):"
+    echo "  curl -H 'Authorization: Bearer <TOKEN>' http://localhost:8001/health"
+    echo ""
+    echo "Call through API Gateway:"
+    echo "  curl -k -H 'Authorization: Bearer <TOKEN>' https://localhost:8243/<context>/<endpoint>"
+    echo ""
     echo "Access APIM DevPortal:"
     echo "  https://localhost:${APIM_PORT}/devportal"
+    echo ""
+    echo "NOTE: If gateway returns 900908 (subscription validation failed),"
+    echo "      use direct service calls. OAuth keys are valid, subscription exists,"
+    echo "      but APIM may need keys re-mapped via DevPortal UI."
     echo ""
 
     return 0

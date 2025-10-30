@@ -268,16 +268,17 @@ cmd_register() {
 ################################################################################
 
 cmd_login() {
-    local username=${1:-}
+    local username_or_email=${1:-}
     local password=${2:-}
     local client_id=${3:-}
     local client_secret=${4:-}
     
-    if [ -z "${username}" ] || [ -z "${password}" ]; then
-        log_error "Usage: $0 login <username> <password> [client_id] [client_secret]"
+    if [ -z "${username_or_email}" ] || [ -z "${password}" ]; then
+        log_error "Usage: $0 login <username|email> <password> [client_id] [client_secret]"
         echo ""
         echo "Example:"
         echo "  $0 login john john123456"
+        echo "  $0 login john@example.com john123456"
         echo ""
         echo "With OAuth2 app:"
         echo "  $0 login john john123456 <client_id> <client_secret>"
@@ -292,6 +293,28 @@ cmd_login() {
     echo "  User Login"
     echo "=========================================="
     echo ""
+    
+    # If input looks like email, look up the username
+    local username="${username_or_email}"
+    if [[ "${username_or_email}" == *"@"* ]]; then
+        log_info "Email detected, looking up username..."
+        local encoded_email=$(url_encode "${username_or_email}")
+        local user_response
+        user_response=$(curl_with_retry -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+            "${SCIM2_API}/Users?filter=emails%20eq%20${encoded_email}")
+        
+        if [ $? -eq 0 ] && validate_json "${user_response}"; then
+            username=$(extract_json_field "${user_response}" ".Resources[0].userName")
+            if [ -z "${username}" ]; then
+                log_error "No user found with email: ${username_or_email}"
+                return 1
+            fi
+            log_info "Found username: ${username}"
+        else
+            log_error "Failed to lookup user by email"
+            return 1
+        fi
+    fi
     
     if [ -n "${client_id}" ] && [ -n "${client_secret}" ]; then
         log_info "Authenticating with OAuth2..."

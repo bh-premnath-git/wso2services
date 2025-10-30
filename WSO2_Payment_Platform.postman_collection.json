@@ -1,0 +1,637 @@
+{
+	"info": {
+		"_postman_id": "wso2-payment-platform-001",
+		"name": "WSO2 Payment Platform - Complete Workflow",
+		"description": "Complete API collection for WSO2 Payment Platform including user management, authentication, and microservices",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. User Management",
+			"item": [
+				{
+					"name": "Register User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"user_id\", jsonData.id);",
+									"    pm.environment.set(\"username\", jsonData.userName);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "admin",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "admin",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:2.0:User\"\n  ],\n  \"userName\": \"testuser\",\n  \"password\": \"Test@123456\",\n  \"name\": {\n    \"givenName\": \"Test\",\n    \"familyName\": \"User\"\n  },\n  \"emails\": [\n    {\n      \"primary\": true,\n      \"value\": \"test@example.com\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "https://localhost:9444/scim2/Users",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "9444",
+							"path": [
+								"scim2",
+								"Users"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Activate User",
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "admin",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "admin",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:api:messages:2.0:PatchOp\"\n  ],\n  \"Operations\": [\n    {\n      \"op\": \"replace\",\n      \"value\": {\n        \"active\": true\n      }\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "https://localhost:9444/scim2/Users/{{user_id}}",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "9444",
+							"path": [
+								"scim2",
+								"Users",
+								"{{user_id}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Details",
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "admin",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "admin",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://localhost:9444/scim2/Users/{{user_id}}",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "9444",
+							"path": [
+								"scim2",
+								"Users",
+								"{{user_id}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. OAuth2 Authentication",
+			"item": [
+				{
+					"name": "Login - Get Access Token",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const username = pm.request.body.urlencoded.get('username');",
+									"",
+									"if (username && username.includes('@')) {",
+									"    pm.sendRequest({",
+									"        url: 'https://localhost:9444/scim2/Users?filter=emails eq ' + encodeURIComponent(username),",
+									"        method: 'GET',",
+									"        header: {",
+									"            'Authorization': 'Basic YWRtaW46YWRtaW4='",
+									"        }",
+									"    }, function (err, response) {",
+									"        if (!err && response.json().Resources && response.json().Resources.length > 0) {",
+									"            const actualUsername = response.json().Resources[0].userName;",
+									"            pm.request.body.urlencoded.remove('username');",
+									"            pm.request.body.urlencoded.add({key: 'username', value: actualUsername});",
+									"        }",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access_token);",
+									"    pm.environment.set(\"refresh_token\", jsonData.refresh_token);",
+									"    pm.environment.set(\"id_token\", jsonData.id_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "{{client_secret}}",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "{{client_id}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "grant_type",
+									"value": "password",
+									"type": "text"
+								},
+								{
+									"key": "username",
+									"value": "testuser",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "Test@123456",
+									"type": "text"
+								},
+								{
+									"key": "scope",
+									"value": "openid",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "https://localhost:9444/oauth2/token",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "9444",
+							"path": [
+								"oauth2",
+								"token"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access_token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "{{client_secret}}",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "{{client_id}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "grant_type",
+									"value": "refresh_token",
+									"type": "text"
+								},
+								{
+									"key": "refresh_token",
+									"value": "{{refresh_token}}",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "https://localhost:9444/oauth2/token",
+							"protocol": "https",
+							"host": [
+								"localhost"
+							],
+							"port": "9444",
+							"path": [
+								"oauth2",
+								"token"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. Forex Service",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8001/health",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"health"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get USD to INR Rate",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8001/rates/USD/INR",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"rates",
+								"USD",
+								"INR"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get EUR to INR Rate",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8001/rates/EUR/INR",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"rates",
+								"EUR",
+								"INR"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get GBP to INR Rate",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8001/rates/GBP/INR",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"rates",
+								"GBP",
+								"INR"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4. Payment Service",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8003/health",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8003",
+							"path": [
+								"health"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Payment",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 1000.00,\n  \"currency\": \"INR\",\n  \"from_account\": \"ACC001\",\n  \"to_account\": \"ACC002\",\n  \"description\": \"Test payment\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8003/payments",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8003",
+							"path": [
+								"payments"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "5. Ledger Service",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8002/health",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8002",
+							"path": [
+								"health"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "6. Profile Service",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8004/health",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8004",
+							"path": [
+								"health"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "7. Rule Engine Service",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8005/health",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"health"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "8. Wallet Service",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8006/health",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8006",
+							"path": [
+								"health"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "client_id",
+			"value": "2TUm51v9tU94ayaV0MRvDNLCutMa",
+			"type": "string"
+		},
+		{
+			"key": "client_secret",
+			"value": "NV4V48dBpwSNQDAETnvWFoDc80UBuOvNjzRjCQD2dYIa",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

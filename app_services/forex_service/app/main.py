@@ -196,7 +196,9 @@ async def root():
 
 @app.get("/rates/{from_currency}/{to_currency}")
 async def get_exchange_rate(from_currency: str, to_currency: str, start_time: Optional[str] = None, end_time: Optional[str] = None):
-    # Cache-aside fast path
+    # Cache hierarchy: Redis → DynamoDB → OANDA API
+    
+    # 1. Try Redis cache first (fastest)
     try:
         ckey = _cache_key(from_currency, to_currency, start_time, end_time)
         cached = _redis.get(ckey)
@@ -206,6 +208,31 @@ async def get_exchange_rate(from_currency: str, to_currency: str, start_time: Op
     except Exception:
         pass
 
+    # 2. Try DynamoDB (if no time filters - only latest rates are in DDB)
+    if not start_time and not end_time:
+        try:
+            pair = f"{from_currency.upper()}{to_currency.upper()}"
+            response = await asyncio.to_thread(
+                lambda: _DDB_TABLE.get_item(Key={"pair": pair})
+            )
+            if "Item" in response:
+                item = _to_native(response["Item"])
+                payload = ExchangeRate(
+                    from_currency=from_currency.upper(),
+                    to_currency=to_currency.upper(),
+                    rate=float(item["rate"]),
+                    timestamp=datetime.fromisoformat(item["updated_at"].replace("Z", "+00:00"))
+                )
+                # Warm Redis cache
+                try:
+                    _redis.setex(ckey, _TTL, payload.model_dump_json())
+                except Exception:
+                    pass
+                return payload
+        except Exception as e:
+            log.warning(f"DynamoDB lookup failed for {pair}: {e}")
+
+    # 3. Fallback to OANDA API or default
     if not config.OANDA_API_KEY:
         return ExchangeRate(
             from_currency=from_currency.upper(),
