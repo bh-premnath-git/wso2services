@@ -190,7 +190,11 @@ async def root():
     return {
         "service": "Forex Service",
         "message": "Currency exchange rate API",
-        "endpoints": ["/health", "/rates/{from_currency}/{to_currency}"]
+        "endpoints": [
+            "GET /health",
+            "GET /rates/{from_currency}/{to_currency}",
+            "PUT /rates/{pair}"
+        ]
     }
 
 

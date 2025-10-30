@@ -445,6 +445,45 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Update Rate (Manual)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"rate\": 85.50,\n  \"note\": \"Manual rate update\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8001/rates/USDINR",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"rates",
+								"USDINR"
+							]
+						}
+					},
+					"response": []
 				}
 			]
 		},
