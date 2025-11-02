@@ -57,6 +57,13 @@ class Config:
     OANDA_API_BASE: str = os.getenv("OANDA_API_BASE", "https://exchange-rates-api.oanda.com/v2")
     OANDA_API_KEY: str = os.getenv("OANDA_API_KEY", "")
 
+    # ============================================================================
+    # Payment Provider Configuration
+    # ============================================================================
+    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
+    STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+    STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
     # Redis and DynamoDB for forex service and background jobs
     AWS_REGION: str = os.getenv("AWS_REGION", "ap-south-1")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "dummy_access_key")

@@ -42,8 +42,9 @@ COPY ./common /app/common
 COPY ./payment_service/requirements.txt /app/payment_service/requirements.txt
 RUN pip install --no-cache-dir -r payment_service/requirements.txt
 
-# Copy application code
+# Copy application code and adapters
 COPY ./payment_service/app /app/app
+COPY ./payment_service/adapters /app/adapters
 
 # Expose port
 EXPOSE 8003
