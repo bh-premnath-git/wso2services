@@ -1,0 +1,1 @@
+"""Models package for profile service"""
