@@ -244,7 +244,7 @@ async def resend_verification_email(username: str):
         async with httpx.AsyncClient(verify=False) as client:
             response = await client.get(
                 f"https://wso2is:9443/scim2/Users",
-                params={"filter": f"userName eq {username}"},
+                params={"filter": f'userName eq "{username.replace(chr(34), chr(92)+chr(34))}"'},
                 headers={
                     "Authorization": wso2_client.auth_header,
                     "Accept": "application/scim+json"
@@ -469,21 +469,21 @@ async def get_current_user_profile(authorization: str = Header(None)):
     access_token = authorization.replace("Bearer ", "")
     
     try:
-        # Get userinfo to extract username (sub claim)
+        # Get userinfo to extract subject (sub claim)
         userinfo = await wso2_client.get_userinfo(access_token)
-        username = userinfo.get("sub")
+        sub = userinfo.get("sub")
         
-        if not username:
+        if not sub:
             raise HTTPException(
                 status_code=401,
-                detail="Unable to extract username from access token"
+                detail="Unable to extract subject from access token"
             )
         
         # Fetch full profile from SCIM
         async with httpx.AsyncClient(verify=False) as client:
-            response = await client.get(
-                f"https://wso2is:9443/scim2/Users",
-                params={"filter": f"userName eq {username}"},
+            # 1) Try SCIM by ID (preferred - sub is the SCIM user ID)
+            scim_by_id = await client.get(
+                f"https://wso2is:9443/scim2/Users/{sub}",
                 headers={
                     "Authorization": wso2_client.auth_header,
                     "Accept": "application/scim+json"
@@ -491,32 +491,52 @@ async def get_current_user_profile(authorization: str = Header(None)):
                 timeout=30.0
             )
             
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("totalResults", 0) > 0:
-                    user = data["Resources"][0]
-                    
-                    # Extract user profile
-                    emails = user.get("emails", [])
-                    phone_numbers = user.get("phoneNumbers", [])
-                    
-                    profile = {
-                        "username": user.get("userName"),
-                        "id": user.get("id"),
-                        "active": user.get("active", False),
-                        "email": emails[0] if emails else None,
-                        "given_name": user.get("name", {}).get("givenName"),
-                        "family_name": user.get("name", {}).get("familyName"),
-                        "full_name": user.get("name", {}).get("formatted"),
-                        "phone": phone_numbers[0] if phone_numbers else None,
-                        "roles": [r.get("display") for r in user.get("roles", [])],
-                    }
-                    
-                    return profile
-                else:
-                    raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+            if scim_by_id.status_code == 200:
+                user = scim_by_id.json()
             else:
-                raise HTTPException(status_code=response.status_code, detail="Failed to fetch user profile")
+                # 2) Fallback: try by username-style claims if present
+                candidate = (
+                    userinfo.get("username")
+                    or userinfo.get("preferred_username")
+                    or userinfo.get("email")
+                )
+                if not candidate:
+                    raise HTTPException(status_code=404, detail="User not found for provided subject")
+                
+                # Quote the value in SCIM filter and escape embedded quotes
+                filter_value = candidate.replace('"', r'\"')
+                scim_search = await client.get(
+                    f"https://wso2is:9443/scim2/Users",
+                    params={"filter": f'userName eq "{filter_value}"'},
+                    headers={
+                        "Authorization": wso2_client.auth_header,
+                        "Accept": "application/scim+json"
+                    },
+                    timeout=30.0
+                )
+                if scim_search.status_code != 200 or scim_search.json().get("totalResults", 0) == 0:
+                    raise HTTPException(status_code=404, detail="User not found")
+                
+                user = scim_search.json()["Resources"][0]
+            
+            # Normalize profile fields
+            emails = user.get("emails", [])
+            phone_numbers = user.get("phoneNumbers", [])
+            email_val = (emails[0].get("value") if emails and isinstance(emails[0], dict) else (emails[0] if emails else None))
+            phone_val = (phone_numbers[0].get("value") if phone_numbers and isinstance(phone_numbers[0], dict) else (phone_numbers[0] if phone_numbers else None))
+            
+            profile = {
+                "username": user.get("userName"),
+                "id": user.get("id"),
+                "active": user.get("active", False),
+                "email": email_val,
+                "given_name": user.get("name", {}).get("givenName"),
+                "family_name": user.get("name", {}).get("familyName"),
+                "full_name": user.get("name", {}).get("formatted"),
+                "phone": phone_val,
+                "roles": [r.get("display") for r in user.get("roles", [])],
+            }
+            return profile
                 
     except WSO2ClientError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
@@ -671,7 +691,7 @@ async def oauth2_token_endpoint(request: Request):
                     async with httpx.AsyncClient(verify=False) as scim_client:
                         scim_response = await scim_client.get(
                             f"https://wso2is:9443/scim2/Users",
-                            params={"filter": f"emails eq {username}"},
+                            params={"filter": f'emails eq "{username.replace("\"" , r"\\\"")}"'},
                             headers={
                                 "Authorization": wso2_client.auth_header,
                                 "Accept": "application/scim+json"
@@ -1086,7 +1106,7 @@ async def initiate_kyc_verification(username: str, request: KYCInitiateRequest):
         async with httpx.AsyncClient(verify=False) as client:
             response = await client.get(
                 f"https://wso2is:9443/scim2/Users",
-                params={"filter": f"userName eq {username}"},
+                params={"filter": f'userName eq "{username.replace(chr(34), chr(92)+chr(34))}"'},
                 headers={
                     "Authorization": wso2_client.auth_header,
                     "Accept": "application/scim+json"

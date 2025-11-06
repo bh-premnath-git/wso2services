@@ -202,7 +202,7 @@ class WSO2IdentityClient:
                 async with httpx.AsyncClient(verify=self.verify_ssl) as scim_client:
                     scim_response = await scim_client.get(
                         f"{self.base_url}/scim2/Users",
-                        params={"filter": f"emails eq {username}"},
+                        params={"filter": f'emails eq "{username.replace(chr(34), chr(92)+chr(34))}"'},
                         headers={
                             "Authorization": self.auth_header,
                             "Accept": "application/scim+json"
@@ -376,7 +376,7 @@ class WSO2IdentityClient:
                 # First, get user ID by username
                 response = await client.get(
                     f"{self.base_url}/scim2/Users",
-                    params={"filter": f"userName eq {reset_request.username}"},
+                    params={"filter": f'userName eq "{reset_request.username.replace(chr(34), chr(92)+chr(34))}"'},
                     headers={
                         "Authorization": self.auth_header,
                         "Accept": "application/scim+json"
@@ -450,7 +450,7 @@ class WSO2IdentityClient:
                 # First, get user ID by username
                 response = await client.get(
                     f"{self.base_url}/scim2/Users",
-                    params={"filter": f"userName eq {username}"},
+                    params={"filter": f'userName eq "{username.replace(chr(34), chr(92)+chr(34))}"'},
                     headers={
                         "Authorization": self.auth_header,
                         "Accept": "application/scim+json"
