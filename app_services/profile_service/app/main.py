@@ -431,6 +431,99 @@ async def get_userinfo(access_token: str):
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 
 
+@app.get("/auth/profile")
+async def get_current_user_profile(authorization: str = Header(None)):
+    """
+    Get full user profile for the authenticated user using access token.
+    
+    **Authentication:**
+    Include the access token in the Authorization header:
+    `Authorization: Bearer <access_token>`
+    
+    **Returns complete user information:**
+    - username
+    - email
+    - given_name (first name)
+    - family_name (last name)
+    - full_name
+    - phone (if available)
+    - address (if available)
+    - active status
+    - roles
+    
+    **Example:**
+    ```bash
+    curl http://localhost:8004/auth/profile \\
+      -H "Authorization: Bearer <your_access_token>"
+    ```
+    
+    This endpoint extracts the user identity from the access token
+    and returns their complete profile from SCIM2.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header. Expected format: 'Bearer <token>'"
+        )
+    
+    access_token = authorization.replace("Bearer ", "")
+    
+    try:
+        # Get userinfo to extract username (sub claim)
+        userinfo = await wso2_client.get_userinfo(access_token)
+        username = userinfo.get("sub")
+        
+        if not username:
+            raise HTTPException(
+                status_code=401,
+                detail="Unable to extract username from access token"
+            )
+        
+        # Fetch full profile from SCIM
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.get(
+                f"https://wso2is:9443/scim2/Users",
+                params={"filter": f"userName eq {username}"},
+                headers={
+                    "Authorization": wso2_client.auth_header,
+                    "Accept": "application/scim+json"
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("totalResults", 0) > 0:
+                    user = data["Resources"][0]
+                    
+                    # Extract user profile
+                    emails = user.get("emails", [])
+                    phone_numbers = user.get("phoneNumbers", [])
+                    
+                    profile = {
+                        "username": user.get("userName"),
+                        "id": user.get("id"),
+                        "active": user.get("active", False),
+                        "email": emails[0] if emails else None,
+                        "given_name": user.get("name", {}).get("givenName"),
+                        "family_name": user.get("name", {}).get("familyName"),
+                        "full_name": user.get("name", {}).get("formatted"),
+                        "phone": phone_numbers[0] if phone_numbers else None,
+                        "roles": [r.get("display") for r in user.get("roles", [])],
+                    }
+                    
+                    return profile
+                else:
+                    raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+            else:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch user profile")
+                
+    except WSO2ClientError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Failed to connect to WSO2 IS: {str(e)}")
+
+
 @app.get("/auth/profile/{username}")
 async def get_user_profile(username: str):
     """
