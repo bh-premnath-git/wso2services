@@ -7,13 +7,14 @@ import logging
 from enum import Enum
 
 import stripe
-from stripe.error import (
+from stripe import (
     StripeError,
     CardError,
     RateLimitError,
     InvalidRequestError,
     AuthenticationError,
     APIConnectionError,
+    SignatureVerificationError,
 )
 
 from ..base import PaymentAdapter
@@ -600,7 +601,7 @@ class StripeAdapter(PaymentAdapter):
             
             return response
             
-        except stripe.error.SignatureVerificationError as e:
+        except SignatureVerificationError as e:
             logger.error(f"Webhook signature verification failed: {e}")
             raise ValidationError("Invalid webhook signature")
         except Exception as e:

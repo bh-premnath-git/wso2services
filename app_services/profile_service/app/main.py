@@ -7,6 +7,8 @@ import hmac
 import hashlib
 import os
 import sys
+import httpx
+import base64
 
 # Add common module to path (works in Docker container)
 common_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'common'))
@@ -499,6 +501,126 @@ async def get_user_profile(username: str):
         raise HTTPException(status_code=503, detail=f"Failed to connect to WSO2 IS: {str(e)}")
 
 
+@app.post("/oauth2/token")
+async def oauth2_token_endpoint(request: Request):
+    """
+    OAuth2 token endpoint proxy - handles standard OAuth2 flows.
+    
+    This endpoint acts as a proxy to WSO2 IS's /oauth2/token endpoint,
+    bypassing SSL certificate issues for frontend applications.
+    
+    **Supported Grant Types:**
+    - `password` - Resource Owner Password Credentials Grant
+    - `refresh_token` - Refresh Token Grant
+    - `authorization_code` - Authorization Code Grant
+    - `client_credentials` - Client Credentials Grant
+    
+    **Usage for Password Grant:**
+    ```bash
+    curl -X POST http://localhost:8004/oauth2/token \\
+      -H "Content-Type: application/x-www-form-urlencoded" \\
+      -d "grant_type=password" \\
+      -d "username=johndoe" \\
+      -d "password=SecurePass123!" \\
+      -d "client_id=your_client_id" \\
+      -d "client_secret=your_client_secret" \\
+      -d "scope=openid profile email"
+    ```
+    
+    **Frontend JavaScript Example:**
+    ```javascript
+    const response = await fetch('http://localhost:8004/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'password',
+        username: email,
+        password: password,
+        client_id: clientId,
+        client_secret: clientSecret,
+        scope: 'openid profile email'
+      })
+    });
+    ```
+    """
+    try:
+        # Get form data from request
+        form_data = await request.form()
+        
+        # Convert to dict for forwarding
+        token_data = dict(form_data)
+        
+        # Email-to-username resolution for password grant
+        # If username looks like an email, resolve it to actual username via SCIM
+        if token_data.get("grant_type") == "password" and "username" in token_data:
+            username = token_data["username"]
+            if "@" in username:
+                # Username is an email, need to resolve to actual username
+                try:
+                    async with httpx.AsyncClient(verify=False) as scim_client:
+                        scim_response = await scim_client.get(
+                            f"https://wso2is:9443/scim2/Users",
+                            params={"filter": f"emails eq {username}"},
+                            headers={
+                                "Authorization": wso2_client.auth_header,
+                                "Accept": "application/scim+json"
+                            },
+                            timeout=10.0
+                        )
+                        
+                        if scim_response.status_code == 200:
+                            data = scim_response.json()
+                            if data.get("totalResults", 0) > 0:
+                                actual_username = data["Resources"][0].get("userName")
+                                if actual_username:
+                                    logger.info(f"Resolved email {username} to username {actual_username}")
+                                    token_data["username"] = actual_username
+                                else:
+                                    logger.warning(f"No username found for email {username}")
+                            else:
+                                logger.warning(f"No user found with email {username}")
+                except Exception as e:
+                    logger.warning(f"Failed to resolve email to username: {e}")
+                    # Continue with original username - WSO2 will handle the error
+        
+        # Extract auth from Authorization header if present (for client_credentials)
+        auth_header = request.headers.get("Authorization")
+        auth = None
+        if auth_header and auth_header.startswith("Basic "):
+            auth_str = base64.b64decode(auth_header.split(" ")[1]).decode()
+            client_id, client_secret = auth_str.split(":", 1)
+            auth = (client_id, client_secret)
+        elif "client_id" in token_data and "client_secret" in token_data:
+            auth = (token_data.pop("client_id"), token_data.pop("client_secret"))
+        
+        # Forward request to WSO2 IS
+        wso2_token_url = f"{os.getenv('WSO2_IS_BASE', 'https://wso2is:9443')}/oauth2/token"
+        
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.post(
+                wso2_token_url,
+                data=token_data,
+                auth=auth,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=30.0
+            )
+            
+            # Return the response from WSO2 IS
+            if response.status_code == 200:
+                return response.json()
+            else:
+                error_detail = response.json() if "application/json" in response.headers.get("content-type", "") else {"error": response.text}
+                raise HTTPException(status_code=response.status_code, detail=error_detail)
+                
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Failed to connect to WSO2 IS: {str(e)}")
+    except Exception as e:
+        logger.error(f"OAuth2 token endpoint error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/auth/refresh")
 async def refresh_access_token(
     refresh_token: str,
@@ -507,9 +629,7 @@ async def refresh_access_token(
 ):
     """Refresh access token using refresh token"""
     try:
-        return await wso2_client.refresh_token(
-            refresh_token, client_id, client_secret
-        )
+        return await wso2_client.refresh_token(refresh_token, client_id, client_secret)
     except WSO2ClientError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
 

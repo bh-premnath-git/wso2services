@@ -82,6 +82,35 @@ app_password= "dashboard"
 [oauth]
 authorize_all_scopes = true
 
+# CORS configuration for OAuth/OIDC flows from frontend applications
+[cors]
+allow_generic_http_requests = true
+allow_any_origin = false
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://localhost:4200",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173"
+]
+allow_subdomains = false
+supported_methods = [
+    "GET",
+    "POST",
+    "HEAD",
+    "OPTIONS",
+    "PUT",
+    "DELETE",
+    "PATCH"
+]
+support_any_header = true
+supported_headers = []
+exposed_headers = []
+supports_credentials = true
+max_age = 3600
+
 # Expose /scim2/Me for APIM UserInfo calls
 [[resource.access_control]]
 context = "(.*)/scim2/Me"
