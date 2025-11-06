@@ -422,6 +422,14 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=profile-service
       - WSO2_IS_URL=https://wso2is:9443
+      # ComplyCube KYC Integration
+      - COMPLYCUBE_API_KEY=${COMPLYCUBE_API_KEY}
+      - COMPLYCUBE_BASE_URL=${COMPLYCUBE_BASE_URL:-https://api.complycube.com}
+      - COMPLYCUBE_FLOW_URL=${COMPLYCUBE_FLOW_URL:-https://flow.complycube.com}
+      - COMPLYCUBE_WEBHOOK_SECRET=${COMPLYCUBE_WEBHOOK_SECRET}
+      - KYC_SUCCESS_URL=${KYC_SUCCESS_URL:-http://localhost:8083/kyc/success}
+      - KYC_CANCEL_URL=${KYC_CANCEL_URL:-http://localhost:8083/kyc/cancel}
+      - KYC_WEBHOOK_URL=${KYC_WEBHOOK_URL:-http://localhost:8004/webhooks/complycube}
     depends_on:
       postgres:
         condition: service_healthy
@@ -522,7 +530,61 @@ services:
       retries: 3
       start_period: 40s
 
-
+  banking-service:
+    build:
+      context: ./app_services
+      dockerfile: banking_service/Dockerfile
+    container_name: banking-service
+    ports:
+      - "8007:8007"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    extra_hosts:
+      - "api.finicity.com:45.223.18.70"
+      - "connect2.finicity.com:45.223.18.70"
+    environment:
+      - SERVICE_NAME=banking_service
+      - SERVICE_PORT=8007
+      - REDIS_URL=redis://:redis-secret@redis:6379/6
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - AWS_REGION=ap-south-1
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=banking-service
+      # Mastercard Open Finance Credentials
+      - MASTERCARD_PARTNER_ID=${MASTERCARD_PARTNER_ID:-your_partner_id}
+      - MASTERCARD_PARTNER_SECRET=${MASTERCARD_PARTNER_SECRET:-your_partner_secret}
+      - MASTERCARD_APP_KEY=${MASTERCARD_APP_KEY:-your_app_key}
+      - MASTERCARD_API_BASE_URL=${MASTERCARD_API_BASE_URL:-https://api.finicity.com}
+      - MASTERCARD_CONNECT_BASE_URL=${MASTERCARD_CONNECT_BASE_URL:-https://connect2.finicity.com}
+      # Application Settings
+      - CALLBACK_BASE_URL=${CALLBACK_BASE_URL:-http://localhost:8007}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-your-32-character-encryption-key}
+      - CACHE_TTL=${CACHE_TTL:-300}
+      - TOKEN_CACHE_TTL=${TOKEN_CACHE_TTL:-7200}
+    depends_on:
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_started
+      dynamodb-init:
+        condition: service_completed_successfully
+      otel-collector:
+        condition: service_started
+    networks:
+      - payment-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   payment-network:

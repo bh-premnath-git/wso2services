@@ -1,7 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Header
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
+import logging
+import hmac
+import hashlib
 import os
 import sys
 
@@ -29,6 +32,11 @@ from auth.models import (
     EmailVerificationRequest,
     EmailVerificationResponse
 )
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 from .email_service import email_service
 
 app = FastAPI(
@@ -38,6 +46,23 @@ app = FastAPI(
 )
 
 add_cors_middleware(app)
+
+try:
+    from complycube import ComplyCubeClient
+    from .config import settings
+    
+    COMPLYCUBE_API_KEY = os.getenv("COMPLYCUBE_API_KEY", "")
+    complycube_client = ComplyCubeClient(api_key=COMPLYCUBE_API_KEY) if COMPLYCUBE_API_KEY else None
+    
+    if not complycube_client:
+        logger.warning("ComplyCube API key not configured. KYC features will not work.")
+    
+    # In-memory user_id -> client_id mapping (replace with database)
+    user_client_mapping = {}
+except ImportError as e:
+    logger.warning(f"ComplyCube integration not available: {e}")
+    complycube_client = None
+    user_client_mapping = {}
 
 # Initialize WSO2 client
 wso2_client = WSO2IdentityClient(
@@ -55,6 +80,15 @@ class UserProfile(BaseModel):
     phone: Optional[str] = None
     kyc_status: str
     created_at: datetime
+
+class KYCInitiateRequest(BaseModel):
+    verification_level: str = "basic"  # "basic" or "enhanced"
+
+class KYCInitiateResponse(BaseModel):
+    session_id: str
+    redirect_url: str
+    status: str
+    message: str
 
 
 @app.post("/register")
@@ -582,7 +616,6 @@ async def update_user_profile(username: str, update_request: UserProfileUpdateRe
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {
         "status": "healthy",
         "service": "profile_service",
@@ -676,28 +709,482 @@ async def get_oauth_credentials():
     )
 
 
-@app.get("/profiles/{user_id}", response_model=UserProfile)
-async def get_profile(user_id: str):
-    """Get user profile (dummy data)"""
-    return UserProfile(
-        user_id=user_id,
-        email="user@example.com",
-        full_name="John Doe",
-        phone="+1234567890",
-        kyc_status="verified",
-        created_at=datetime.now()
-    )
+@app.get("/profiles/{username}", response_model=UserProfile)
+async def get_profile(username: str):
+    """
+    Get user profile with KYC status.
+    
+    Fetches user data from WSO2 IS and includes KYC verification status.
+    
+    **Path Parameter:**
+    - username: The username to fetch profile for
+    
+    **Example:**
+    ```bash
+    curl http://localhost:8004/profiles/johndoe
+    ```
+    
+    **Returns:** Complete user profile with KYC status
+    """
+    import httpx
+    
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            # Query SCIM for user
+            response = await client.get(
+                f"https://wso2is:9443/scim2/Users",
+                params={"filter": f"userName eq {username}"},
+                headers={
+                    "Authorization": wso2_client.auth_header,
+                    "Accept": "application/scim+json"
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("totalResults", 0) > 0:
+                    user = data["Resources"][0]
+                    
+                    # Extract user data
+                    user_id = user.get("id")
+                    emails = user.get("emails", [])
+                    email = emails[0].get("value") if emails and isinstance(emails[0], dict) else (emails[0] if emails else "unknown@example.com")
+                    phone_numbers = user.get("phoneNumbers", [])
+                    phone = phone_numbers[0].get("value") if phone_numbers and isinstance(phone_numbers[0], dict) else (phone_numbers[0] if phone_numbers else None)
+                    
+                    given_name = user.get("name", {}).get("givenName", "")
+                    family_name = user.get("name", {}).get("familyName", "")
+                    full_name = f"{given_name} {family_name}".strip() or username
+                    
+                    # Get KYC status
+                    kyc_status = "not_started"
+                    client_id = user_client_mapping.get(username)
+                    if client_id:
+                        # Session has been created
+                        kyc_status = "pending"
+                        if complycube_client:
+                            try:
+                                checks_list = complycube_client.checks.list(clientId=client_id)
+                                checks = list(checks_list) if checks_list else []
+                                
+                                if checks:
+                                    passed = sum(1 for c in checks if getattr(getattr(c, 'result', None), 'outcome', None) == 'clear')
+                                    failed = sum(1 for c in checks if getattr(getattr(c, 'result', None), 'outcome', None) in ['attention', 'rejected'])
+                                    
+                                    if failed > 0:
+                                        kyc_status = "rejected"
+                                    elif passed == len(checks):
+                                        kyc_status = "verified"
+                                    else:
+                                        kyc_status = "pending"
+                            except:
+                                pass
+                    
+                    # Get creation date
+                    created_at = user.get("meta", {}).get("created")
+                    if created_at:
+                        try:
+                            created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        except:
+                            created_at = datetime.now()
+                    else:
+                        created_at = datetime.now()
+                    
+                    return UserProfile(
+                        user_id=username,
+                        email=email,
+                        full_name=full_name,
+                        phone=phone,
+                        kyc_status=kyc_status,
+                        created_at=created_at
+                    )
+                else:
+                    raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+            else:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch user profile")
+                
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Failed to connect to WSO2 IS: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching profile: {str(e)}")
 
 
-@app.get("/profiles/{user_id}/kyc")
-async def get_kyc_status(user_id: str):
-    """Get KYC status for user (dummy data)"""
-    return {
-        "user_id": user_id,
-        "kyc_status": "verified",
-        "verification_date": datetime.now().isoformat(),
-        "documents_submitted": ["passport", "proof_of_address"]
+@app.post("/profiles/{username}/kyc/initiate", response_model=KYCInitiateResponse)
+async def initiate_kyc_verification(username: str, request: KYCInitiateRequest):
+    """
+    Initiate KYC verification using ComplyCube Flow hosted solution.
+    
+    Fetches user data from WSO2 IS and creates a ComplyCube verification session.
+    
+    **Path Parameter:**
+    - username: The username to initiate KYC for
+    
+    **Request body:**
+    ```json
+    {
+      "verification_level": "basic"  // or "enhanced"
     }
+    ```
+    
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8004/profiles/johndoe/kyc/initiate \\
+      -H "Content-Type: application/json" \\
+      -d '{"verification_level": "basic"}'
+    ```
+    
+    **Returns:** KYC session with redirect URL for user to complete verification
+    """
+    import httpx
+    
+    try:
+        if not complycube_client:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "KYC_NOT_CONFIGURED",
+                    "message": "ComplyCube API key is not configured",
+                    "user_id": username
+                }
+            )
+        
+        logger.info(f"Initiating KYC verification for user: {username}")
+        
+        # Fetch user data from WSO2 IS
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.get(
+                f"https://wso2is:9443/scim2/Users",
+                params={"filter": f"userName eq {username}"},
+                headers={
+                    "Authorization": wso2_client.auth_header,
+                    "Accept": "application/scim+json"
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"User '{username}' not found in identity server"
+                )
+            
+            data = response.json()
+            if data.get("totalResults", 0) == 0:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"User '{username}' not found"
+                )
+            
+            user = data["Resources"][0]
+            
+            # Extract user details
+            emails = user.get("emails", [])
+            if not emails:
+                raise HTTPException(
+                    status_code=400,
+                    detail="User email is required for KYC verification"
+                )
+            
+            email = emails[0].get("value") if isinstance(emails[0], dict) else emails[0]
+            given_name = user.get("name", {}).get("givenName", "")
+            family_name = user.get("name", {}).get("familyName", "")
+            
+            if not given_name or not family_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="User first name and last name are required for KYC verification"
+                )
+        
+        # Create ComplyCube client
+        cc_client = complycube_client.clients.create(
+            type='person',
+            email=email,
+            personDetails={
+                'firstName': given_name,
+                'lastName': family_name
+            }
+        )
+        
+        client_id = cc_client.id
+        logger.info(f"ComplyCube client created: {client_id}")
+        
+        user_client_mapping[username] = client_id
+        
+        # Use configured check types based on verification level
+        check_types = settings.KYC_BASIC_CHECKS if request.verification_level == 'basic' else settings.KYC_ENHANCED_CHECKS
+        
+        success_url = settings.KYC_SUCCESS_URL
+        cancel_url = settings.KYC_CANCEL_URL
+        
+        session = complycube_client.flow.create(
+            clientId=client_id,
+            checkTypes=check_types,
+            successUrl=success_url,
+            cancelUrl=cancel_url
+        )
+        
+        redirect_url = session.redirect_url
+        session_token = redirect_url.split('/')[-1] if redirect_url else "unknown"
+        
+        logger.info(f"Flow session created: {redirect_url}")
+        
+        return KYCInitiateResponse(
+            session_id=session_token,
+            redirect_url=redirect_url,
+            status="active",
+            message="KYC verification session created successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error initiating KYC for user {username}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "KYC_INITIATION_FAILED",
+                "message": f"Failed to initiate KYC verification: {str(e)}",
+                "user_id": username
+            }
+        )
+
+
+@app.get("/profiles/{username}/kyc/status")
+async def get_detailed_kyc_status(username: str):
+    """
+    Retrieve KYC verification status with check results and document URLs.
+    
+    **Path Parameter:**
+    - username: The username to check KYC status for
+    
+    **Example:**
+    ```bash
+    curl http://localhost:8004/profiles/johndoe/kyc/status
+    ```
+    
+    **Returns:** Complete KYC status including checks, documents, and verification results
+    """
+    try:
+        client_id = user_client_mapping.get(username)
+        
+        if not client_id:
+            logger.info(f"No ComplyCube client found for user: {username}")
+            return {
+                "user_id": username,
+                "overall_status": "not_started",
+                "verification_level": None,
+                "last_verification_date": None,
+                "total_sessions": 0,
+                "completed_sessions": 0,
+                "total_checks": 0,
+                "passed_checks": 0,
+                "failed_checks": 0,
+                "checks": [],
+                "documents": [],
+                "sessions": [],
+                "message": "KYC verification not yet initiated"
+            }
+        
+        if not complycube_client:
+            raise HTTPException(status_code=500, detail="ComplyCube client not configured")
+        
+        logger.info(f"Fetching KYC status for user: {username}, client_id: {client_id}")
+        
+        client = complycube_client.clients.get(client_id)
+        checks_list = complycube_client.checks.list(clientId=client_id)
+        checks = list(checks_list) if checks_list else []
+        documents_list = complycube_client.documents.list(clientId=client_id)
+        documents = list(documents_list) if documents_list else []
+        
+        total_checks = len(checks)
+        passed_checks = 0
+        failed_checks = 0
+        
+        for check in checks:
+            result = getattr(check, 'result', None)
+            if result:
+                outcome = None
+                if isinstance(result, dict):
+                    outcome = result.get('outcome')
+                elif isinstance(result, str):
+                    outcome = result
+                else:
+                    outcome = getattr(result, 'outcome', None)
+                
+                if outcome == 'clear':
+                    passed_checks += 1
+                elif outcome in ['attention', 'rejected']:
+                    failed_checks += 1
+        
+        if total_checks == 0:
+            overall_status = "pending"
+        elif failed_checks > 0:
+            overall_status = "rejected"
+        elif passed_checks == total_checks:
+            overall_status = "verified"
+        else:
+            overall_status = "pending"
+        
+        last_verification_date = None
+        if checks:
+            latest_check = max(checks, key=lambda c: getattr(c, 'updatedAt', getattr(c, 'createdAt', '')))
+            last_verification_date = getattr(latest_check, 'updatedAt', getattr(latest_check, 'createdAt', None))
+        
+        checks_data = []
+        for check in checks:
+            created_at = getattr(check, 'createdAt', None) or getattr(check, 'created_at', None)
+            updated_at = getattr(check, 'updatedAt', None) or getattr(check, 'updated_at', None)
+            
+            checks_data.append({
+                "id": getattr(check, 'id', None),
+                "type": getattr(check, 'type', None),
+                "status": getattr(check, 'status', None),
+                "result": getattr(check, 'result', None),
+                "created_at": created_at,
+                "updated_at": updated_at
+            })
+        
+        documents_data = []
+        for doc in documents:
+            doc_id = getattr(doc, 'id', None)
+            created_at = getattr(doc, 'createdAt', None) or getattr(doc, 'created_at', None)
+            
+            doc_data = {
+                "id": doc_id,
+                "type": getattr(doc, 'type', None),
+                "uploaded_at": created_at
+            }
+            
+            if doc_id:
+                doc_data["download_url"] = f"https://api.complycube.com/v1/documents/{doc_id}/download"
+                
+                images = getattr(doc, 'images', [])
+                if images:
+                    doc_data["images"] = []
+                    for idx, image in enumerate(images):
+                        image_id = getattr(image, 'id', None)
+                        if image_id:
+                            doc_data["images"].append({
+                                "id": image_id,
+                                "type": getattr(image, 'type', 'unknown'),
+                                "url": f"https://api.complycube.com/v1/documents/{doc_id}/images/{image_id}"
+                            })
+            
+            documents_data.append(doc_data)
+        
+        return {
+            "user_id": username,
+            "overall_status": overall_status,
+            "verification_level": "basic",  # TODO: Get from stored data
+            "last_verification_date": last_verification_date,
+            "total_sessions": 1,  # TODO: Track actual sessions
+            "completed_sessions": 1 if total_checks > 0 else 0,
+            "total_checks": total_checks,
+            "passed_checks": passed_checks,
+            "failed_checks": failed_checks,
+            "checks": checks_data,
+            "documents": documents_data,
+            "sessions": [],  # TODO: Track session history
+            "complycube_client_id": client_id,
+            "message": "KYC status retrieved from ComplyCube"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching KYC status for user {username}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "STATUS_FETCH_FAILED",
+                "message": f"Failed to fetch KYC status: {str(e)}",
+                "user_id": username
+            }
+        )
+
+
+@app.post("/webhooks/complycube")
+async def complycube_webhook(
+    request: Request,
+    x_complycube_signature: Optional[str] = Header(None)
+):
+    """Webhook endpoint for ComplyCube real-time events (validates HMAC-SHA256 signature)"""
+    try:
+        body = await request.body()
+        payload = await request.json()
+        
+        webhook_secret = os.getenv("COMPLYCUBE_WEBHOOK_SECRET", "")
+        if webhook_secret and x_complycube_signature:
+            expected_signature = hmac.new(
+                webhook_secret.encode(),
+                body,
+                hashlib.sha256
+            ).hexdigest()
+            
+            if not hmac.compare_digest(expected_signature, x_complycube_signature):
+                logger.warning("Webhook signature validation failed")
+                raise HTTPException(status_code=401, detail="Invalid signature")
+        
+        event_type = payload.get("type")
+        event_id = payload.get("id")
+        logger.info(f"Received webhook: {event_type} (ID: {event_id})")
+        logger.info(f"Payload: {payload}")
+        if event_type == "check.completed":
+            await handle_check_completed(payload)
+        elif event_type == "check.pending":
+            await handle_check_pending(payload)
+        elif event_type == "document.uploaded":
+            await handle_document_uploaded(payload)
+        elif event_type == "client.updated":
+            await handle_client_updated(payload)
+        else:
+            logger.info(f"Unhandled event type: {event_type}")
+        
+        return {"status": "received", "event_type": event_type}
+        
+    except Exception as e:
+        logger.error(f"Webhook processing error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_check_completed(payload: Dict[str, Any]):
+    data = payload.get("data", {})
+    check_id = data.get("id")
+    check_type = data.get("type")
+    result = data.get("result")
+    client_id = data.get("clientId")
+    
+    logger.info(f"Check completed: {check_type} for client {client_id}, result: {result}")
+    # TODO: db.update_kyc_check(client_id, check_id, check_type, result)
+
+
+async def handle_check_pending(payload: Dict[str, Any]):
+    data = payload.get("data", {})
+    check_id = data.get("id")
+    check_type = data.get("type")
+    client_id = data.get("clientId")
+    
+    logger.info(f"Check pending: {check_type} for client {client_id}")
+    # TODO: db.update_kyc_check_status(client_id, check_id, "pending")
+
+
+async def handle_document_uploaded(payload: Dict[str, Any]):
+    data = payload.get("data", {})
+    document_id = data.get("id")
+    document_type = data.get("type")
+    client_id = data.get("clientId")
+    
+    logger.info(f"Document uploaded: {document_type} for client {client_id}")
+    # TODO: db.add_kyc_document(client_id, document_id, document_type)
+
+
+async def handle_client_updated(payload: Dict[str, Any]):
+    data = payload.get("data", {})
+    client_id = data.get("id")
+    
+    logger.info(f"Client updated: {client_id}")
+    # TODO: db.update_client_info(client_id, data)
 
 
 if __name__ == "__main__":
