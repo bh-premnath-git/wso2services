@@ -180,8 +180,11 @@ class WSO2IdentityClient:
         """
         Authenticate user and get JWT tokens.
         
+        Supports email-to-username resolution: if username contains '@',
+        it will be resolved to the actual username via SCIM API.
+        
         Args:
-            token_request: Username, password, client credentials, and scopes
+            token_request: Username (or email), password, client credentials, and scopes
             
         Returns:
             TokenResponse with access_token, id_token, and decoded claims
@@ -191,6 +194,31 @@ class WSO2IdentityClient:
         """
         
         scope_string = " ".join(token_request.scopes)
+        username = token_request.username
+        
+        # Email-to-username resolution
+        if "@" in username:
+            try:
+                async with httpx.AsyncClient(verify=self.verify_ssl) as scim_client:
+                    scim_response = await scim_client.get(
+                        f"{self.base_url}/scim2/Users",
+                        params={"filter": f"emails eq {username}"},
+                        headers={
+                            "Authorization": self.auth_header,
+                            "Accept": "application/scim+json"
+                        },
+                        timeout=10.0
+                    )
+                    
+                    if scim_response.status_code == 200:
+                        data = scim_response.json()
+                        if data.get("totalResults", 0) > 0:
+                            actual_username = data["Resources"][0].get("userName")
+                            if actual_username:
+                                username = actual_username
+            except Exception:
+                # If resolution fails, continue with original username
+                pass
         
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
             try:
@@ -198,7 +226,7 @@ class WSO2IdentityClient:
                     f"{self.base_url}/oauth2/token",
                     data={
                         "grant_type": "password",
-                        "username": token_request.username,
+                        "username": username,
                         "password": token_request.password,
                         "scope": scope_string
                     },

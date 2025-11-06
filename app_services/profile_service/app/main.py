@@ -515,12 +515,28 @@ async def oauth2_token_endpoint(request: Request):
     - `authorization_code` - Authorization Code Grant
     - `client_credentials` - Client Credentials Grant
     
-    **Usage for Password Grant:**
+    **Email-to-Username Resolution:**
+    The endpoint automatically resolves email addresses to usernames for password grant.
+    You can use either username or email in the `username` field.
+    
+    **Usage for Password Grant (with username):**
     ```bash
     curl -X POST http://localhost:8004/oauth2/token \\
       -H "Content-Type: application/x-www-form-urlencoded" \\
       -d "grant_type=password" \\
       -d "username=johndoe" \\
+      -d "password=SecurePass123!" \\
+      -d "client_id=your_client_id" \\
+      -d "client_secret=your_client_secret" \\
+      -d "scope=openid profile email"
+    ```
+    
+    **Usage for Password Grant (with email):**
+    ```bash
+    curl -X POST http://localhost:8004/oauth2/token \\
+      -H "Content-Type: application/x-www-form-urlencoded" \\
+      -d "grant_type=password" \\
+      -d "username=john@example.com" \\
       -d "password=SecurePass123!" \\
       -d "client_id=your_client_id" \\
       -d "client_secret=your_client_secret" \\
@@ -536,7 +552,7 @@ async def oauth2_token_endpoint(request: Request):
       },
       body: new URLSearchParams({
         grant_type: 'password',
-        username: email,
+        username: email,  // Can be username or email address
         password: password,
         client_id: clientId,
         client_secret: clientSecret,
