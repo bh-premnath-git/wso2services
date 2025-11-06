@@ -32,6 +32,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.14 1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Update CA certificates and upgrade pip with latest certificates
+RUN update-ca-certificates && \
+    pip install --ignore-installed --upgrade pip setuptools wheel certifi && \
+    pip config set global.trusted-host "pypi.org files.pythonhosted.org pypi.python.org"
+
 # Set working directory
 WORKDIR /app
 
@@ -40,7 +45,7 @@ COPY ./common /app/common
 
 # Copy service requirements and install
 COPY ./wallet_service/requirements.txt /app/wallet_service/requirements.txt
-RUN pip install --no-cache-dir -r wallet_service/requirements.txt
+RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host files.pythonhosted.org -r wallet_service/requirements.txt
 
 # Copy application code
 COPY ./wallet_service/app /app/app

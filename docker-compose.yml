@@ -130,9 +130,7 @@ services:
     networks: [ payment-network ]
 
   otel-collector:
-    build:
-      context: ./otel
-      dockerfile: Dockerfile
+    image: otel/opentelemetry-collector-contrib:0.113.0
     container_name: otel-collector
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
