@@ -39,7 +39,17 @@ TEST_APP="TestApplication"
 TEST_API="TestPaymentAPI"
 API_VERSION="1.0.0"
 API_CONTEXT="/test-payment"
+
+# Available backend services (change API_BACKEND to test different services):
+# - http://banking-service:8007   (Bank account linking)
+# - http://forex-service:8001     (Currency rates)
+# - http://ledger-service:8002    (Accounting)
+# - http://payment-service:8003   (Payment processing)
+# - http://profile-service:8004   (User profiles)
+# - http://rule-engine-service:8005 (Business rules)
+# - http://wallet-service:8006    (Digital wallets)
 API_BACKEND="http://payment-service:8003"
+
 CALLBACK_URL="http://localhost:8080/callback"
 
 # Helper functions
@@ -95,7 +105,7 @@ step1_health_and_setup() {
     fi
     
     log_step "1.2" "Setting up Key Manager..."
-    if ! "${TOOLKIT}" setup-key-manager; then
+    if ! "${TOOLKIT}" setup-km; then
         log_warn "Key Manager might already be configured"
     fi
     
@@ -223,7 +233,7 @@ step6_register_activate_user() {
     fi
     
     log_step "6.2" "Activating user: ${TEST_USER}..."
-    if ! "${USER_MANAGER}" activate-user "${TEST_USER}" activate; then
+    if ! "${USER_MANAGER}" activate-user "${TEST_USER}"; then
         log_warn "User might already be activated"
     fi
     

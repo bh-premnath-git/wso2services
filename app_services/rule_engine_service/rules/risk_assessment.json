@@ -1,0 +1,75 @@
+{
+  "contentType": "application/vnd.gorules.decision",
+  "nodes": [
+    {
+      "id": "request",
+      "name": "Request",
+      "type": "inputNode",
+      "position": {
+        "x": 100,
+        "y": 200
+      },
+      "content": {}
+    },
+    {
+      "id": "risk_calculation",
+      "name": "Risk Score Calculation",
+      "type": "expressionNode",
+      "position": {
+        "x": 400,
+        "y": 200
+      },
+      "content": {
+        "expressions": [
+          {
+            "id": "base_risk",
+            "key": "base_risk",
+            "value": "transaction_amount / 100000"
+          },
+          {
+            "id": "country_risk",
+            "key": "country_risk",
+            "value": "country in [\"IR\", \"KP\", \"SY\"] ? 1.0 : (country in [\"RU\", \"CN\", \"VE\"] ? 0.5 : 0.1)"
+          },
+          {
+            "id": "type_risk",
+            "key": "type_risk",
+            "value": "transaction_type == \"withdrawal\" ? 0.3 : 0.1"
+          },
+          {
+            "id": "final_risk",
+            "key": "risk_score",
+            "value": "min(base_risk + country_risk + type_risk, 1.0)"
+          },
+          {
+            "id": "risk_level",
+            "key": "risk_level",
+            "value": "risk_score > 0.8 ? \"high\" : (risk_score > 0.5 ? \"medium\" : \"low\")"
+          }
+        ]
+      }
+    },
+    {
+      "id": "response",
+      "name": "Response",
+      "type": "outputNode",
+      "position": {
+        "x": 700,
+        "y": 200
+      },
+      "content": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_1",
+      "sourceId": "request",
+      "targetId": "risk_calculation"
+    },
+    {
+      "id": "edge_2",
+      "sourceId": "risk_calculation",
+      "targetId": "response"
+    }
+  ]
+}

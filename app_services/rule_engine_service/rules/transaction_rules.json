@@ -1,0 +1,163 @@
+{
+  "contentType": "application/vnd.gorules.decision",
+  "nodes": [
+    {
+      "id": "request",
+      "name": "Request",
+      "type": "inputNode",
+      "position": {
+        "x": 100,
+        "y": 200
+      },
+      "content": {}
+    },
+    {
+      "id": "transaction_validation",
+      "name": "Transaction Validation",
+      "type": "decisionTableNode",
+      "position": {
+        "x": 400,
+        "y": 200
+      },
+      "content": {
+        "hitPolicy": "first",
+        "inputs": [
+          {
+            "id": "amount_input",
+            "name": "Amount",
+            "type": "expression",
+            "field": "transaction_amount"
+          },
+          {
+            "id": "country_input",
+            "name": "Country",
+            "type": "expression",
+            "field": "country"
+          },
+          {
+            "id": "type_input",
+            "name": "Type",
+            "type": "expression",
+            "field": "transaction_type"
+          }
+        ],
+        "outputs": [
+          {
+            "id": "allowed_output",
+            "name": "allowed",
+            "type": "expression",
+            "field": "allowed"
+          },
+          {
+            "id": "risk_score_output",
+            "name": "risk_score",
+            "type": "expression",
+            "field": "risk_score"
+          },
+          {
+            "id": "message_output",
+            "name": "message",
+            "type": "expression",
+            "field": "message"
+          },
+          {
+            "id": "rules_applied_output",
+            "name": "rules_applied",
+            "type": "expression",
+            "field": "rules_applied"
+          }
+        ],
+        "rules": [
+          {
+            "id": "rule_1",
+            "_description": "High risk countries blocked",
+            "amount_input": "",
+            "country_input": "\"IR\", \"KP\", \"SY\"",
+            "type_input": "",
+            "allowed_output": "false",
+            "risk_score_output": "1.0",
+            "message_output": "\"Transaction blocked: High-risk country\"",
+            "rules_applied_output": "[\"country_sanctions\"]"
+          },
+          {
+            "id": "rule_2",
+            "_description": "Large transactions require additional verification",
+            "amount_input": "> 100000",
+            "country_input": "",
+            "type_input": "",
+            "allowed_output": "false",
+            "risk_score_output": "0.9",
+            "message_output": "\"Transaction requires manual verification\"",
+            "rules_applied_output": "[\"high_value_review\"]"
+          },
+          {
+            "id": "rule_3",
+            "_description": "Withdrawal transactions over 50k",
+            "amount_input": "> 50000",
+            "country_input": "",
+            "type_input": "\"withdrawal\"",
+            "allowed_output": "false",
+            "risk_score_output": "0.7",
+            "message_output": "\"Large withdrawal requires verification\"",
+            "rules_applied_output": "[\"large_withdrawal_limit\"]"
+          },
+          {
+            "id": "rule_4",
+            "_description": "Medium amounts in medium-risk countries",
+            "amount_input": "[10000..50000]",
+            "country_input": "\"RU\", \"CN\", \"VE\"",
+            "type_input": "",
+            "allowed_output": "true",
+            "risk_score_output": "0.6",
+            "message_output": "\"Transaction allowed with monitoring\"",
+            "rules_applied_output": "[\"amount_limit\", \"country_monitoring\"]"
+          },
+          {
+            "id": "rule_5",
+            "_description": "Standard transactions",
+            "amount_input": "<= 10000",
+            "country_input": "",
+            "type_input": "",
+            "allowed_output": "true",
+            "risk_score_output": "0.2",
+            "message_output": "\"Transaction approved\"",
+            "rules_applied_output": "[\"amount_limit\", \"country_check\", \"kyc_verification\"]"
+          },
+          {
+            "id": "rule_6",
+            "_description": "Default allow for other cases",
+            "amount_input": "",
+            "country_input": "",
+            "type_input": "",
+            "allowed_output": "true",
+            "risk_score_output": "0.3",
+            "message_output": "\"Transaction approved\"",
+            "rules_applied_output": "[\"standard_verification\"]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "response",
+      "name": "Response",
+      "type": "outputNode",
+      "position": {
+        "x": 700,
+        "y": 200
+      },
+      "content": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_1",
+      "sourceId": "request",
+      "targetId": "transaction_validation"
+    },
+    {
+      "id": "edge_2",
+      "sourceId": "transaction_validation",
+      "targetId": "response"
+    }
+  ]
+}

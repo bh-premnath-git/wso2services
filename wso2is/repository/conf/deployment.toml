@@ -12,19 +12,19 @@ create_admin_account = true
 type = "database_unique_id"
 
 [database.identity_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/identity_db"
+type = "mysql"
+url = "jdbc:mysql://mysql-wso2:3306/WSO2_IDENTITY_DB?useSSL=false&amp;allowPublicKeyRetrieval=true"
 username = "wso2carbon"
 password = "wso2carbon"
-driver = "org.postgresql.Driver"
+driver = "com.mysql.cj.jdbc.Driver"
 validationQuery = "SELECT 1"
 
 [database.shared_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/shared_db_is"
+type = "mysql"
+url = "jdbc:mysql://mysql-wso2:3306/WSO2_SHARED_DB?useSSL=false&amp;allowPublicKeyRetrieval=true"
 username = "wso2carbon"
 password = "wso2carbon"
-driver = "org.postgresql.Driver"
+driver = "com.mysql.cj.jdbc.Driver"
 validationQuery = "SELECT 1"
 
 [keystore.primary]
@@ -118,6 +118,36 @@ secure = true
 http_method = "GET"
 cross_tenant = true
 permissions = []
+scopes = []
+
+# Allow APIM to access DCR endpoints for OAuth app management
+# Fix for 401 error when APIM tries to retrieve application details
+[[resource.access_control]]
+context = "(.*)/api/identity/oauth2/dcr/v1.1/register(.*)"
+secure = true
+http_method = "GET"
+permissions = ["/permission/admin/manage/identity/applicationmgt/view"]
+scopes = []
+
+[[resource.access_control]]
+context = "(.*)/api/identity/oauth2/dcr/v1.1/register(.*)"
+secure = true
+http_method = "POST"
+permissions = ["/permission/admin/manage/identity/applicationmgt/create"]
+scopes = []
+
+[[resource.access_control]]
+context = "(.*)/api/identity/oauth2/dcr/v1.1/register(.*)"
+secure = true
+http_method = "DELETE"
+permissions = ["/permission/admin/manage/identity/applicationmgt/delete"]
+scopes = []
+
+[[resource.access_control]]
+context = "(.*)/api/identity/oauth2/dcr/v1.1/register(.*)"
+secure = true
+http_method = "PUT"
+permissions = ["/permission/admin/manage/identity/applicationmgt/update"]
 scopes = []
 
 # Token revocation notifier → APIM

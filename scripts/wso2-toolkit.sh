@@ -21,6 +21,15 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Auto-detect WSO2 versions (detect once when needed - use latest version)
+get_wso2am_home() {
+    docker exec wso2am bash -c "ls -d /home/wso2carbon/wso2am-* 2>/dev/null | sort -V | tail -1" 2>/dev/null || echo "/home/wso2carbon/wso2am-4.6.0"
+}
+
+get_wso2is_home() {
+    docker exec wso2is bash -c "ls -d /home/wso2carbon/wso2is-* 2>/dev/null | sort -V | tail -1" 2>/dev/null || echo "/home/wso2carbon/wso2is-7.2.0"
+}
+
 # Configuration
 APIM_HOST="${APIM_HOST:-localhost}"
 APIM_PORT="${APIM_PORT:-9443}"
@@ -347,7 +356,7 @@ cmd_setup_km() {
     "ConsumerKeyClaim": "azp",
     "VALIDITY_PERIOD": "3600",
     "validation_enable": true,
-    "self_validate_jwt": false,
+    "self_validate_jwt": true,
     "api_resource_mgt_endpoint": ("https://" + $is_host + ":" + $is_port + "/api/server/v1/api-resources"),
     "roles_endpoint": ("https://" + $is_host + ":" + $is_port + "/scim2/Roles")
   }
@@ -553,200 +562,140 @@ cmd_fix_mtls() {
     check_container "wso2am" || return 1
     check_container "wso2is" || return 1
     
+    # Get dynamic paths
+    local WSO2AM_HOME=$(get_wso2am_home)
+    local WSO2IS_HOME=$(get_wso2is_home)
+    
     echo ""
     echo "=========================================="
     echo "  Fix MTLS Certificate Trust"
     echo "=========================================="
     echo ""
     
-    # Ensure APIM TLS keystore exists with proper SANs (separate from internal keystore)
-    log_info "Ensuring APIM TLS keystore (wso2am.jks) has proper SANs..."
-    local tls_keystore="/home/wso2carbon/wso2am-4.5.0/repository/resources/security/wso2am.jks"
-    local tls_alias="wso2am"
-    local tls_pass="changeit"
-
-    # Check if keystore exists and contains SAN=wso2am
-    local tls_sans
-    tls_sans=$(docker exec wso2am sh -lc "if [ -f '${tls_keystore}' ]; then keytool -list -v -keystore '${tls_keystore}' -storepass '${tls_pass}' -alias '${tls_alias}' 2>/dev/null | grep -A 1 SubjectAlternativeName || true; fi")
-    if [ -z "${tls_sans}" ] || ! echo "${tls_sans}" | grep -q "wso2am"; then
-        log_warn "⚠️  TLS keystore missing or SANs incomplete. Creating wso2am.jks..."
-        # Remove any existing keystore to avoid alias conflicts
-        docker exec wso2am sh -lc "rm -f '${tls_keystore}'"
-        # Generate new TLS keystore with SANs
-        docker exec wso2am keytool -genkeypair -alias "${tls_alias}" \
-            -keyalg RSA -keysize 2048 -validity 3650 \
-            -dname "CN=wso2am, OU=WSO2, O=WSO2, L=Mountain View, ST=CA, C=US" \
-            -ext "SAN=dns:wso2am,dns:localhost,ip:127.0.0.1" \
-            -keystore "${tls_keystore}" \
-            -storepass "${tls_pass}" -keypass "${tls_pass}" >/dev/null 2>&1
-        if [ $? -ne 0 ]; then
-            log_error "Failed to create APIM TLS keystore (wso2am.jks)"
-            return 1
-        fi
-        log_success "✓ Created APIM TLS keystore with SANs: wso2am, localhost"
-    else
-        log_success "✓ APIM TLS keystore already valid"
-    fi
-
-    # Update APIM client-truststore to trust its TLS cert (self-trust for internal HTTPS calls)
-    log_info "Updating APIM client-truststore with TLS certificate..."
-    docker exec wso2am keytool -export -alias "${tls_alias}" -keystore "${tls_keystore}" -file /tmp/wso2am-tls.crt -storepass "${tls_pass}" >/dev/null 2>&1
-    docker exec wso2am keytool -delete -alias "${tls_alias}" -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks -storepass wso2carbon >/dev/null 2>&1
-    docker exec wso2am keytool -import -alias "${tls_alias}" -file /tmp/wso2am-tls.crt -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks -storepass wso2carbon -noprompt >/dev/null 2>&1
-    log_success "✓ APIM client-truststore trusts TLS cert (alias wso2am)"
+    log_info "Detected WSO2 AM: ${WSO2AM_HOME}"
+    log_info "Detected WSO2 IS: ${WSO2IS_HOME}"
+    echo ""
+    log_info "Based on WSO2 official documentation:"
+    log_info "- Export public certificates from each keystore"
+    log_info "- Import to the other's client-truststore"
+    echo ""
     
-    # Check IS certificate
-    log_info "Checking IS certificate SANs..."
-    local is_sans
-    is_sans=$(docker exec wso2is keytool -list -v -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 -storetype PKCS12 -storepass wso2carbon -alias wso2carbon 2>&1 | grep -A 1 "SubjectAlternativeName")
-    
-    if ! echo "$is_sans" | grep -q "wso2is"; then
-        log_warn "⚠️  IS certificate missing 'wso2is' in SANs. Regenerating..."
-        
-        # Backup existing keystore
-        docker exec wso2is cp /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
-            /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12.backup
-        
-        # Delete old certificate
-        docker exec wso2is keytool -delete -alias wso2carbon \
-            -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
-            -storetype PKCS12 -storepass wso2carbon >/dev/null 2>&1
-        
-        # Generate new certificate with proper SANs
-        docker exec wso2is keytool -genkeypair -alias wso2carbon \
-            -keyalg RSA -keysize 2048 -validity 3650 \
-            -dname "CN=localhost, OU=WSO2, O=WSO2, L=Santa Clara, ST=CA, C=US" \
-            -ext "SAN=dns:wso2is,dns:localhost,ip:127.0.0.1" \
-            -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
-            -storetype PKCS12 -storepass wso2carbon -keypass wso2carbon >/dev/null 2>&1
-        
-        if [ $? -eq 0 ]; then
-            log_success "✓ IS certificate regenerated with SANs: wso2is, localhost"
-            
-            # CRITICAL: Update self-trust - export new cert to truststore
-            log_info "Updating IS self-trust..."
-            docker exec wso2is keytool -export -alias wso2carbon \
-                -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
-                -storetype PKCS12 -file /tmp/wso2is-self.crt -storepass wso2carbon >/dev/null 2>&1
-            
-            docker exec wso2is keytool -delete -alias wso2carbon \
-                -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
-                -storetype PKCS12 -storepass wso2carbon >/dev/null 2>&1
-            
-            docker exec wso2is keytool -import -alias wso2carbon \
-                -file /tmp/wso2is-self.crt \
-                -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
-                -storetype PKCS12 -storepass wso2carbon -noprompt >/dev/null 2>&1
-            
-            if [ $? -eq 0 ]; then
-                log_success "✓ IS self-trust updated"
-            else
-                log_error "Failed to update IS self-trust"
-                return 1
-            fi
-        else
-            log_error "Failed to regenerate IS certificate"
-            return 1
-        fi
-    else
-        log_success "✓ IS certificate already has proper SANs"
-    fi
-    
-    # Step 1: Export IS certificate from PKCS12 keystore
-    log_info "Exporting IS certificate..."
+    # Step 1: Export IS certificate from its keystore (wso2carbon.p12)
+    log_info "Step 1/4: Exporting IS certificate from wso2carbon.p12..."
     
     docker exec wso2is keytool -export -alias wso2carbon \
-        -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12 \
+        -keystore ${WSO2IS_HOME}/repository/resources/security/wso2carbon.p12 \
         -storetype PKCS12 \
-        -file /tmp/wso2is.crt -storepass wso2carbon >/dev/null 2>&1
+        -file /tmp/wso2is-cert.pem \
+        -storepass wso2carbon >/dev/null 2>&1
     
     if [ $? -ne 0 ]; then
         log_error "Failed to export IS certificate"
         return 1
     fi
     
-    log_success "✓ IS certificate exported"
+    log_success "✓ IS certificate exported to /tmp/wso2is-cert.pem"
     
-    # Step 2: Import IS certificate to APIM truststore
-    log_info "Importing IS certificate to APIM truststore..."
+    # Step 2: Import IS certificate to APIM truststore (client-truststore.jks)
+    log_info "Step 2/4: Importing IS certificate to APIM client-truststore.jks..."
     
-    # Copy cert from IS to APIM
-    docker cp wso2is:/tmp/wso2is.crt /tmp/wso2is.crt
-    docker cp /tmp/wso2is.crt wso2am:/tmp/wso2is.crt
+    # Copy cert from IS container to host, then to APIM container
+    docker exec wso2is cat /tmp/wso2is-cert.pem > /tmp/wso2is-cert-host.pem 2>/dev/null
+    docker cp /tmp/wso2is-cert-host.pem wso2am:/tmp/wso2is-cert.pem
     
-    # Delete old IS certificate if exists (both potential aliases)
+    # Delete old alias if exists to avoid conflicts
     docker exec wso2am keytool -delete -alias wso2is \
-        -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks \
+        -keystore ${WSO2AM_HOME}/repository/resources/security/client-truststore.jks \
         -storepass wso2carbon >/dev/null 2>&1
     
-    # Also clean up old wso2carbon alias from IS if it exists (prevents signature mismatch)
-    docker exec wso2am bash -c "keytool -list -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks -storepass wso2carbon -alias wso2carbon 2>&1 | grep -q 'wso2is' && keytool -delete -alias wso2carbon -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks -storepass wso2carbon" >/dev/null 2>&1
+    # Import with root user to ensure permissions
+    local import_result
+    import_result=$(docker exec -u root wso2am bash -c "keytool -import -alias wso2is \
+        -keystore ${WSO2AM_HOME}/repository/resources/security/client-truststore.jks \
+        -file /tmp/wso2is-cert.pem \
+        -storepass wso2carbon \
+        -noprompt 2>&1")
+    local import_status=$?
     
-    # Import to APIM JKS truststore (APIM 4.5 uses JKS)
-    docker exec wso2am keytool -import -alias wso2is \
-        -file /tmp/wso2is.crt \
-        -keystore /home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks \
-        -storepass wso2carbon -noprompt >/dev/null 2>&1
-    
-    if [ $? -ne 0 ]; then
+    if [ $import_status -ne 0 ]; then
         log_error "Failed to import IS certificate to APIM truststore"
+        echo "${import_result}"
         return 1
-    else
-        log_success "✓ IS certificate imported to APIM truststore"
     fi
     
-    # Step 3: Export APIM TLS certificate (from wso2am.jks)
-    log_info "Exporting APIM TLS certificate..."
+    # Fix permissions
+    docker exec -u root wso2am chmod 644 ${WSO2AM_HOME}/repository/resources/security/client-truststore.jks >/dev/null 2>&1
     
-    docker exec wso2am keytool -export -alias "${tls_alias}" \
-        -keystore "${tls_keystore}" \
-        -file /tmp/wso2am.crt -storepass "${tls_pass}" >/dev/null 2>&1
+    log_success "✓ IS certificate imported to APIM truststore (alias: wso2is)"
+    
+    # Step 3: Export APIM certificate from its keystore (wso2carbon.jks)
+    log_info "Step 3/4: Exporting APIM certificate from wso2carbon.jks..."
+    
+    docker exec wso2am keytool -export -alias wso2carbon \
+        -keystore ${WSO2AM_HOME}/repository/resources/security/wso2carbon.jks \
+        -storetype JKS \
+        -file /tmp/wso2am-cert.pem \
+        -storepass wso2carbon >/dev/null 2>&1
     
     if [ $? -ne 0 ]; then
         log_error "Failed to export APIM certificate"
         return 1
     fi
     
-    log_success "✓ APIM certificate exported"
+    log_success "✓ APIM certificate exported to /tmp/wso2am-cert.pem"
     
-    # Step 4: Import APIM certificate to IS truststore
-    log_info "Importing APIM certificate to IS truststore..."
+    # Step 4: Import APIM certificate to IS truststore (client-truststore.p12)
+    log_info "Step 4/4: Importing APIM certificate to IS client-truststore.p12..."
     
-    # Copy cert from APIM to IS
-    docker cp wso2am:/tmp/wso2am.crt /tmp/wso2am.crt
-    docker cp /tmp/wso2am.crt wso2is:/tmp/wso2am.crt
+    # Copy cert from APIM container to host, then to IS container
+    docker exec wso2am cat /tmp/wso2am-cert.pem > /tmp/wso2am-cert-host.pem 2>/dev/null
+    docker cp /tmp/wso2am-cert-host.pem wso2is:/tmp/wso2am-cert.pem
     
-    # Delete old APIM certificate if exists
+    # Delete old alias if exists to avoid conflicts
     docker exec wso2is keytool -delete -alias wso2am \
-        -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
-        -storetype PKCS12 -storepass wso2carbon >/dev/null 2>&1
-    
-    # Import to IS PKCS12 truststore
-    docker exec wso2is keytool -import -alias wso2am \
-        -file /tmp/wso2am.crt \
-        -keystore /home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12 \
+        -keystore ${WSO2IS_HOME}/repository/resources/security/client-truststore.p12 \
         -storetype PKCS12 \
-        -storepass wso2carbon -noprompt >/dev/null 2>&1
+        -storepass wso2carbon >/dev/null 2>&1
     
-    if [ $? -ne 0 ]; then
+    # Import with root user to ensure permissions
+    local import_result_is
+    import_result_is=$(docker exec -u root wso2is bash -c "keytool -import -alias wso2am \
+        -keystore ${WSO2IS_HOME}/repository/resources/security/client-truststore.p12 \
+        -file /tmp/wso2am-cert.pem \
+        -storepass wso2carbon \
+        -storetype PKCS12 \
+        -noprompt 2>&1")
+    local import_status_is=$?
+    
+    if [ $import_status_is -ne 0 ]; then
         log_error "Failed to import APIM certificate to IS truststore"
+        echo "${import_result_is}"
         return 1
-    else
-        log_success "✓ APIM certificate imported to IS truststore"
     fi
     
-    # Cleanup
-    rm -f /tmp/wso2is.crt /tmp/wso2am.crt
-    docker exec wso2is rm -f /tmp/wso2is.crt /tmp/wso2am.crt 2>/dev/null
-    docker exec wso2am rm -f /tmp/wso2is.crt /tmp/wso2am.crt 2>/dev/null
+    # Fix permissions
+    docker exec -u root wso2is chmod 644 ${WSO2IS_HOME}/repository/resources/security/client-truststore.p12 >/dev/null 2>&1
+    
+    log_success "✓ APIM certificate imported to IS truststore (alias: wso2am)"
+    
+    # Cleanup temporary files
+    rm -f /tmp/wso2is-cert-host.pem /tmp/wso2am-cert-host.pem 2>/dev/null || true
+    docker exec wso2is rm -f /tmp/wso2is-cert.pem /tmp/wso2am-cert.pem 2>/dev/null || true
+    docker exec wso2am rm -f /tmp/wso2is-cert.pem /tmp/wso2am-cert.pem 2>/dev/null || true
     
     echo ""
-    log_success "✅ MTLS certificate trust configured!"
-    log_warn "⚠️  Restart both containers to apply changes:"
-    echo "     docker restart wso2am wso2is"
+    log_success "✅ MTLS certificate trust configured successfully!"
     echo ""
-    echo "After restart, wait ~60 seconds for services to initialize."
+    log_warn "⚠️  IMPORTANT: Restart both containers to apply changes:"
+    echo "     docker compose restart wso2am wso2is"
     echo ""
+    echo "After restart, wait ~90 seconds for services to fully initialize."
+    echo ""
+    log_info "Then verify with:"
+    echo "     $0 check-mtls"
+    echo ""
+    
+    return 0
 }
 
 ################################################################################
@@ -1027,6 +976,8 @@ EOF
     echo "  ./wso2is-user.sh login <username> <password> ${consumer_key} ${consumer_secret}"
     echo ""
     echo "Call services directly (bypassing gateway):"
+    echo "  # Available services: 8007 (banking), 8001 (forex), 8002 (ledger),"
+    echo "  #                     8003 (payment), 8004 (profile), 8005 (rule-engine), 8006 (wallet)"
     echo "  curl -H 'Authorization: Bearer <TOKEN>' http://localhost:8001/health"
     echo ""
     echo "Call through API Gateway:"
@@ -1104,45 +1055,58 @@ cmd_get_app_keys() {
     echo "=========================================="
     echo ""
 
-    local keys_api="https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/applications/${app_id}/keys/${key_type}"
-
     log_info "Fetching ${key_type} keys for application ${app_id}..."
+    
+    # Get keys from APIM DevPortal API (endpoint: /keys not /oauth-keys)
+    local api_url="https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/applications/${app_id}/keys/${key_type}"
+    
     local response
     response=$(curl -k -sS -u "${APIM_ADMIN_USER}:${APIM_ADMIN_PASS}" \
-        "${keys_api}" 2>&1)
-
+        -H "Content-Type: application/json" \
+        -X GET "${api_url}" 2>&1)
+    
     if echo "${response}" | grep -q '"consumerKey"'; then
-        local consumer_key=$(echo "${response}" | jq -r '.consumerKey // empty' 2>/dev/null)
-        local consumer_secret=$(echo "${response}" | jq -r '.consumerSecret // empty' 2>/dev/null)
-        local callback=$(echo "${response}" | jq -r '.callbackUrl // empty' 2>/dev/null)
-        local key_manager=$(echo "${response}" | jq -r '.keyManager // empty' 2>/dev/null)
-
+        local consumer_key
+        local consumer_secret
+        local supported_grants
+        local callback_url
+        
+        consumer_key=$(echo "${response}" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('consumerKey', 'N/A'))" 2>/dev/null)
+        consumer_secret=$(echo "${response}" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('consumerSecret', 'N/A'))" 2>/dev/null)
+        supported_grants=$(echo "${response}" | python3 -c "import sys, json; data=json.load(sys.stdin); print(', '.join(data.get('supportedGrantTypes', [])))" 2>/dev/null)
+        callback_url=$(echo "${response}" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('callbackUrl', 'N/A'))" 2>/dev/null)
+        
+        # If consumer_key exists but no secret, try direct DCR endpoint
+        if [ "${consumer_secret}" = "N/A" ] && [ "${consumer_key}" != "N/A" ]; then
+            log_warn "Consumer secret masked by APIM. Fetching directly from WSO2 IS DCR endpoint..."
+            
+            local dcr_response
+            dcr_response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+                -H "Accept: application/json" \
+                -X GET "https://${WSO2IS_HOST}:${WSO2IS_PORT}/api/identity/oauth2/dcr/v1.1/register/${consumer_key}" 2>&1)
+            
+            if echo "${dcr_response}" | grep -q '"client_secret"'; then
+                consumer_secret=$(echo "${dcr_response}" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('client_secret', 'N/A'))" 2>/dev/null)
+                log_success "Retrieved secret from WSO2 IS DCR"
+            fi
+        fi
+        
         echo ""
         echo "╔══════════════════════════════════════════════════════════╗"
-        echo "║               OAuth2 Client Credentials                 ║"
+        echo "║  OAuth2 Credentials (${key_type})                        ║"
         echo "╚══════════════════════════════════════════════════════════╝"
         echo ""
         echo "Application ID:  ${app_id}"
-        echo "Key Type:        ${key_type}"
-        echo "Key Manager:     ${key_manager}"
         echo "Client ID:       ${consumer_key}"
         echo "Client Secret:   ${consumer_secret}"
-        echo "Callback URL:    ${callback}"
+        echo "Callback URL:    ${callback_url}"
+        echo "Grant Types:     ${supported_grants}"
         echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "Save to .env file:"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "OAUTH2_CLIENT_ID=${consumer_key}"
-        echo "OAUTH2_CLIENT_SECRET=${consumer_secret}"
-        echo "OAUTH2_TOKEN_URL=https://localhost:9444/oauth2/token"
-        echo "OAUTH2_CALLBACK_URL=${callback}"
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "Test token generation:"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  ./wso2-toolkit.sh get-token cc ${consumer_key} ${consumer_secret}"
         echo ""
-        echo "./scripts/wso2-toolkit.sh get-token cc ${consumer_key} ${consumer_secret}"
+        echo "Call API through gateway:"
+        echo "  curl -k -H 'Authorization: Bearer <TOKEN>' https://localhost:8243/<context>/<endpoint>"
         echo ""
 
         # Show supported grant types
@@ -1165,6 +1129,77 @@ cmd_get_app_keys() {
         echo ""
         echo "This application may not have keys generated yet."
         echo "Generate keys with: $0 create-app <name> <callback_url>"
+        return 1
+    fi
+}
+
+################################################################################
+# COMMAND: get-client - Get OAuth client details directly from WSO2 IS DCR
+################################################################################
+
+cmd_get_client() {
+    local client_id=${1:-}
+
+    if [ -z "${client_id}" ]; then
+        log_error "Usage: $0 get-client <client_id>"
+        echo ""
+        echo "Get client_id from: $0 create-app output"
+        return 1
+    fi
+
+    check_container "wso2is" || return 1
+
+    echo ""
+    echo "=========================================="
+    echo "  OAuth2 Client Details (WSO2 IS DCR)"
+    echo "=========================================="
+    echo ""
+    
+    log_info "Fetching OAuth client: ${client_id}"
+    
+    # Use external port for WSO2 IS when accessing from host
+    local dcr_url="https://localhost:${WSO2IS_EXTERNAL_PORT}/api/identity/oauth2/dcr/v1.1/register/${client_id}"
+    
+    local response
+    response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+        -H "Accept: application/json" \
+        -X GET "${dcr_url}" 2>&1)
+    
+    if echo "${response}" | grep -q '"client_id"'; then
+        local client_secret
+        local grant_types
+        local callback_url
+        
+        client_secret=$(echo "${response}" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('client_secret', 'N/A'))" 2>/dev/null)
+        grant_types=$(echo "${response}" | python3 -c "import sys, json; data=json.load(sys.stdin); print(', '.join(data.get('grant_types', [])))" 2>/dev/null)
+        callback_url=$(echo "${response}" | python3 -c "import sys, json; data=json.load(sys.stdin); print(', '.join(data.get('redirect_uris', [])))" 2>/dev/null)
+        
+        echo ""
+        echo "╔══════════════════════════════════════════════════════════╗"
+        echo "║  OAuth2 Client Credentials                              ║"
+        echo "╚══════════════════════════════════════════════════════════╝"
+        echo ""
+        echo "Client ID:       ${client_id}"
+        echo "Client Secret:   ${client_secret}"
+        echo "Callback URL:    ${callback_url}"
+        echo "Grant Types:     ${grant_types}"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Test token generation:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "./scripts/wso2-toolkit.sh get-token cc ${client_id} ${client_secret}"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Full Details:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "${response}" | python3 -m json.tool 2>/dev/null
+        echo ""
+        return 0
+    else
+        log_error "Failed to fetch client details"
+        echo "${response}"
         return 1
     fi
 }
@@ -1981,6 +2016,10 @@ case "${COMMAND}" in
     get-app-keys)
         shift
         cmd_get_app_keys "$@"
+        ;;
+    get-client)
+        shift
+        cmd_get_client "$@"
         ;;
     delete-app)
         shift

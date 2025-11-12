@@ -217,8 +217,9 @@ cmd_create_api() {
         log_error "Usage: $0 create-api <name> [version] [context] [backend_url]"
         echo ""
         echo "Examples:"
-        echo "  $0 create-api PaymentAPI 1.0.0 /payment http://localhost:8080"
-        echo "  $0 create-api UserAPI 2.0.0 /users https://api.example.com"
+        echo "  $0 create-api PaymentAPI 1.0.0 /payment http://payment-service:8003"
+        echo "  $0 create-api BankingAPI 1.0.0 /banking http://banking-service:8007"
+        echo "  $0 create-api ForexAPI 1.0.0 /forex http://forex-service:8001"
         return 1
     fi
     
@@ -831,8 +832,9 @@ cmd_quick_deploy() {
     if [ -z "${api_name}" ]; then
         log_error "Usage: $0 quick-deploy <name> [version] [context] [backend_url]"
         echo ""
-        echo "Example:"
-        echo "  $0 quick-deploy PaymentAPI 1.0.0 /payment http://localhost:8080"
+        echo "Examples:"
+        echo "  $0 quick-deploy PaymentAPI 1.0.0 /payment http://payment-service:8003"
+        echo "  $0 quick-deploy BankingAPI 1.0.0 /banking http://banking-service:8007"
         return 1
     fi
     
@@ -964,18 +966,25 @@ COMMANDS:
 
 EXAMPLES:
   # Quick deploy (everything in one command)
-  ./api-manager.sh quick-deploy PaymentAPI 1.0.0 /payment http://localhost:8080
+  ./api-manager.sh quick-deploy PaymentAPI 1.0.0 /payment http://payment-service:8003
+  ./api-manager.sh quick-deploy BankingAPI 1.0.0 /banking http://banking-service:8007
 
   # Step by step
-  ./api-manager.sh create-api UserAPI 1.0.0 /users https://api.example.com
+  ./api-manager.sh create-api ForexAPI 1.0.0 /forex http://forex-service:8001
   ./api-manager.sh deploy-api <api-id>
+
+  # Available backend services:
+  #   banking-service:8007, forex-service:8001, ledger-service:8002,
+  #   payment-service:8003, profile-service:8004, rule-engine-service:8005,
+  #   wallet-service:8006
 
   # Subscribe application
   ./api-manager.sh subscribe <app-id> <api-id> Unlimited
 
   # List resources
   ./api-manager.sh list-apis
-  ./api-manager.sh list-subscriptions
+  ./api-manager.sh list-subscriptions <app-id> app
+  ./api-manager.sh list-subscriptions <api-id> api
 
 NOTES:
   - Uses external WSO2 IS Key Manager for OAuth2

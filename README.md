@@ -25,8 +25,9 @@ A comprehensive microservices-based payment platform integrating **WSO2 Identity
 
 This platform provides a complete payment processing ecosystem with:
 
-- **6 Microservices**: Forex, Ledger, Payment, Profile, Rule Engine, and Wallet
+- **7 Microservices**: Banking, Forex, Ledger, Payment, Profile, Rule Engine, and Wallet
 - **WSO2 Integration**: Centralized identity management and API gateway
+- **Business Rules Engine**: GoRules BRMS for decision management
 - **Event-Driven Architecture**: Kafka-compatible event streaming (Redpanda)
 - **Distributed Tracing**: OpenTelemetry + Jaeger for complete observability
 - **Production-Ready**: Health checks, monitoring, graceful shutdowns
@@ -35,6 +36,7 @@ This platform provides a complete payment processing ecosystem with:
 
 ✅ OAuth2/OIDC authentication via WSO2 Identity Server  
 ✅ API Gateway management with WSO2 API Manager  
+✅ Business rules management with GoRules BRMS  
 ✅ Real-time forex rate updates with Celery background workers  
 ✅ Double-entry ledger system for financial transactions  
 ✅ Distributed caching with Redis  
@@ -65,14 +67,14 @@ This platform provides a complete payment processing ecosystem with:
 │                     📦 Microservices Layer                      │
 │                                                                 │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
-│  │  Forex   │  │  Ledger  │  │ Payment  │  │ Profile  │      │
-│  │  :8001   │  │  :8002   │  │  :8003   │  │  :8004   │      │
+│  │ Banking  │  │  Forex   │  │  Ledger  │  │ Payment  │      │
+│  │  :8007   │  │  :8001   │  │  :8002   │  │  :8003   │      │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘      │
 │                                                                 │
-│  ┌──────────┐  ┌──────────┐                                   │
-│  │Rule Eng. │  │  Wallet  │                                   │
-│  │  :8005   │  │  :8006   │                                   │
-│  └──────────┘  └──────────┘                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                    │
+│  │ Profile  │  │Rule Eng. │  │  Wallet  │                    │
+│  │  :8004   │  │  :8005   │  │  :8006   │                    │
+│  └──────────┘  └──────────┘  └──────────┘                    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -168,6 +170,15 @@ graph TD
 │   │   ├── utils.py                # Redis, DynamoDB, helpers
 │   │   └── requirements.txt        # Shared dependencies
 │   │
+│   ├── banking_service/            # Bank account linking (Mastercard)
+│   │   ├── app/
+│   │   │   ├── main.py             # FastAPI application
+│   │   │   ├── config.py           # Service configuration
+│   │   │   ├── api/v1/             # API endpoints
+│   │   │   └── services/           # Mastercard Open Finance integration
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
+│   │
 │   ├── forex_service/              # Currency exchange rates
 │   │   ├── app/
 │   │   │   ├── main.py             # FastAPI application
@@ -185,10 +196,11 @@ graph TD
 ├── 📂 app_scripts/                 # Initialization scripts
 │   └── init_dynamodb.sh            # DynamoDB table creation
 │
-├── 📂 scripts/                     # Automation & tooling
-│   ├── wso2-toolkit.sh             # Complete WSO2 management
-│   ├── api-manager.sh              # API Manager operations
-│   └── wso2is-user.sh              # User management
+├── 📂 scripts/                     # Automation & tooling (44 commands total)
+│   ├── wso2-toolkit.sh             # WSO2 management (19 commands)
+│   ├── api-manager.sh              # API lifecycle (10 commands)
+│   ├── wso2is-user.sh              # User management (8 commands)
+│   └── complete-workflow-test.sh   # Automated E2E test
 │
 ├── 📂 wso2am/                      # API Manager configuration
 │   ├── Dockerfile
@@ -221,7 +233,8 @@ graph TD
 │   └── collector.yaml              # OTel Collector config
 │
 └── 📄 Documentation
-    ├── README.md                   # This file
+    ├── README.md                   # This file (overview & quick start)
+    ├── WORKFLOW_GUIDE.md           # Complete command reference & workflows
     ├── TLS-Setup.md                # Certificate setup guide
     └── WSO2_Architecture.md        # WSO2 integration details
 ```
@@ -257,6 +270,7 @@ Ensure these ports are available:
 | Redpanda | 9092, 9644, 8082 | Kafka API |
 | WSO2 AM | 9443, 8280, 8243 | API Manager |
 | WSO2 IS | 9444, 9764 | Identity Server |
+| Banking Service | 8007 | Bank linking |
 | Forex Service | 8001 | Currency rates |
 | Ledger Service | 8002 | Accounting |
 | Payment Service | 8003 | Payments |
@@ -333,14 +347,26 @@ docker compose ps
 # Wait ~60 seconds for WSO2 IS OSGi bundles to fully initialize
 sleep 60
 
-# Run WSO2 toolkit setup (creates Key Manager, apps, tokens)
-./scripts/wso2-toolkit.sh setup-all
+# Run health check
+./scripts/wso2-toolkit.sh health
+
+# Setup Key Manager
+./scripts/wso2-toolkit.sh setup-km
+
+# Check MTLS certificates
+./scripts/wso2-toolkit.sh check-mtls
+
+# Create default roles
+./scripts/wso2-toolkit.sh create-roles
 ```
+
+**For complete workflow**, see [WORKFLOW_GUIDE.md](WORKFLOW_GUIDE.md)
 
 ### 5. Verify Services
 
 ```bash
 # Check microservice health
+curl http://localhost:8007/health  # Banking
 curl http://localhost:8001/health  # Forex
 curl http://localhost:8002/health  # Ledger
 curl http://localhost:8003/health  # Payment
@@ -358,7 +384,35 @@ curl http://localhost:8006/health  # Wallet
 
 ## 🔧 Service Details
 
-### 1️⃣ Forex Service (Port 8001)
+### 1️⃣ Banking Service (Port 8007)
+
+**Purpose**: Bank account linking and data aggregation
+
+**Features**:
+- Mastercard Open Finance integration (formerly Finicity)
+- Bank account connection and verification
+- Transaction data aggregation
+- Account balance retrieval
+- Redis caching for tokens and data
+- DynamoDB storage for connection metadata
+
+**Endpoints**:
+- `GET /health` - Health check
+- `POST /v1/bank-accounts/connect` - Initiate bank connection
+- `GET /v1/bank-accounts/{id}` - Get account details
+- `GET /v1/bank-accounts/{id}/transactions` - Fetch transactions
+- `GET /v1/bank-accounts/{id}/balance` - Get account balance
+
+**Configuration** (`.env`):
+```bash
+MASTERCARD_PARTNER_ID=your_partner_id
+MASTERCARD_PARTNER_SECRET=your_partner_secret
+MASTERCARD_APP_KEY=your_app_key
+MASTERCARD_API_BASE_URL=https://api.finicity.com
+ENCRYPTION_KEY=your-32-character-encryption-key
+```
+
+### 2️⃣ Forex Service (Port 8001)
 
 **Purpose**: Real-time currency exchange rate management
 
@@ -381,7 +435,7 @@ OANDA_API_KEY=your_api_key_here
 PAIRS_CSV=USDINR,EURINR,GBPINR
 ```
 
-### 2️⃣ Ledger Service (Port 8002)
+### 3️⃣ Ledger Service (Port 8002)
 
 **Purpose**: Double-entry accounting system
 
@@ -393,7 +447,7 @@ PAIRS_CSV=USDINR,EURINR,GBPINR
 
 **Database**: `ledger_db` (PostgreSQL)
 
-### 3️⃣ Payment Service (Port 8003)
+### 4️⃣ Payment Service (Port 8003)
 
 **Purpose**: Payment orchestration and processing
 
@@ -405,7 +459,7 @@ PAIRS_CSV=USDINR,EURINR,GBPINR
 
 **Database**: `payment_db` (PostgreSQL)
 
-### 4️⃣ Profile Service (Port 8004)
+### 5️⃣ Profile Service (Port 8004)
 
 **Purpose**: User profile and identity management
 
@@ -420,7 +474,7 @@ WSO2_IS_URL=https://wso2is:9443
 
 **Database**: `profile_db` (PostgreSQL)
 
-### 5️⃣ Rule Engine Service (Port 8005)
+### 6️⃣ Rule Engine Service (Port 8005)
 
 **Purpose**: Centralized business rules evaluation
 
@@ -431,7 +485,7 @@ WSO2_IS_URL=https://wso2is:9443
 
 **Database**: `rule_engine_db` (PostgreSQL)
 
-### 6️⃣ Wallet Service (Port 8006)
+### 7️⃣ Wallet Service (Port 8006)
 
 **Purpose**: Digital wallet operations
 
@@ -482,7 +536,7 @@ conf/postgres/scripts/00-init-all.sql
 
 Creates:
 - WSO2 databases: `apim_db`, `identity_db`, `shared_db`
-- Service databases: `forex_db`, `ledger_db`, `payment_db`, `profile_db`, `rule_engine_db`, `wallet_db`
+- Service databases: `banking_db`, `forex_db`, `ledger_db`, `payment_db`, `profile_db`, `rule_engine_db`, `wallet_db`
 
 ---
 
@@ -521,43 +575,54 @@ Full guide: [TLS-Setup.md](TLS-Setup.md)
 
 ## 📜 Scripts & Automation
 
-### wso2-toolkit.sh
+### Quick Command Reference
 
-**Complete WSO2 management automation**
-
+**wso2-toolkit.sh** - Complete WSO2 management (19 commands)
 ```bash
-# Health checks
-./scripts/wso2-toolkit.sh health
+# Infrastructure
+./scripts/wso2-toolkit.sh health              # Health check
+./scripts/wso2-toolkit.sh setup-km             # Setup Key Manager
+./scripts/wso2-toolkit.sh check-mtls           # Check MTLS
+./scripts/wso2-toolkit.sh fix-mtls             # Fix MTLS issues
 
-# Setup Key Manager in APIM
-./scripts/wso2-toolkit.sh setup-key-manager
+# Applications
+./scripts/wso2-toolkit.sh create-app MyApp    # Create OAuth2 app
+./scripts/wso2-toolkit.sh list-apps            # List all apps
+./scripts/wso2-toolkit.sh get-app-keys <id>   # Get OAuth2 credentials
 
-# Create application and generate keys
-./scripts/wso2-toolkit.sh create-app MyApp
+# Roles
+./scripts/wso2-toolkit.sh create-roles        # Create default roles
+./scripts/wso2-toolkit.sh list-roles           # List all roles
 
-# Generate OAuth2 tokens (all grant types)
-./scripts/wso2-toolkit.sh token:client-credentials MyApp
-./scripts/wso2-toolkit.sh token:password username password
-./scripts/wso2-toolkit.sh token:refresh <refresh_token>
-
-# Complete setup (all-in-one)
-./scripts/wso2-toolkit.sh setup-all
+# Tokens (8 grant types supported)
+./scripts/wso2-toolkit.sh get-token cc <client_id> <secret>
+./scripts/wso2-toolkit.sh get-token password <client_id> <secret> <user> <pass>
+./scripts/wso2-toolkit.sh get-token refresh <client_id> <secret> <refresh_token>
 ```
 
-**Features**:
-- ✅ Dependency checking (jq, curl, docker, python3)
-- ✅ Input validation
-- ✅ Comprehensive error handling
-- ✅ Support for all OAuth2 grant types
-- ✅ Certificate management
+**api-manager.sh** - API lifecycle management (10 commands)
+```bash
+./scripts/api-manager.sh create-api <name> <version> <context> <backend>
+./scripts/api-manager.sh deploy-api <api_id>
+./scripts/api-manager.sh quick-deploy <name> <version> <context> <backend>
+./scripts/api-manager.sh subscribe <app_id> <api_id>
+./scripts/api-manager.sh list-subscriptions <app_id> app
+```
 
-### api-manager.sh
+**wso2is-user.sh** - User management (8 commands)
+```bash
+./scripts/wso2is-user.sh register <user> <pass> <email>
+./scripts/wso2is-user.sh activate-user <username>
+./scripts/wso2is-user.sh login <user> <pass> <client_id> <secret>
+./scripts/wso2is-user.sh list-users
+```
 
-WSO2 API Manager specific operations (31KB script)
+**complete-workflow-test.sh** - Automated end-to-end test
+```bash
+./scripts/complete-workflow-test.sh           # Full workflow automation
+```
 
-### wso2is-user.sh
-
-User and role management via SCIM2 API (21KB script)
+**📖 For detailed command documentation, see [WORKFLOW_GUIDE.md](WORKFLOW_GUIDE.md)**
 
 ### init_dynamodb.sh
 
@@ -596,6 +661,7 @@ exporters: [otlp, debug]
 - Error tracking
 
 **Service Names**:
+- `banking-service`
 - `forex-service`
 - `ledger-service`
 - `payment-service`
@@ -610,7 +676,7 @@ exporters: [otlp, debug]
 docker compose ps
 
 # Individual service health endpoints
-for port in 8001 8002 8003 8004 8005 8006; do
+for port in 8007 8001 8002 8003 8004 8005 8006; do
   echo "Service on port $port:"
   curl -s http://localhost:$port/health | jq .
 done
@@ -809,7 +875,9 @@ logging.basicConfig(level=logging.DEBUG)
 
 ## 📚 Additional Documentation
 
-- **[TLS-Setup.md](TLS-Setup.md)**: Complete certificate setup guide
+### Project Documentation
+- **[WORKFLOW_GUIDE.md](WORKFLOW_GUIDE.md)**: Complete step-by-step workflow guide with all commands
+- **[TLS-Setup.md](TLS-Setup.md)**: Certificate setup and configuration
 - **[WSO2_Architecture.md](WSO2_Architecture.md)**: Detailed WSO2 integration architecture
 
 ### WSO2 Official Documentation

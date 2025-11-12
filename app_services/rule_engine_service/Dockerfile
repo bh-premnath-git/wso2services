@@ -50,6 +50,9 @@ RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host files.pyth
 # Copy application code
 COPY ./rule_engine_service/app /app/app
 
+# Copy JDM rule files
+COPY ./rule_engine_service/rules /app/rules
+
 # Expose port
 EXPOSE 8005
 
