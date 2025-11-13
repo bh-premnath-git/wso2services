@@ -340,9 +340,11 @@ cmd_login() {
         if [ -n "${access_token}" ]; then
             log_success "Login successful!"
             echo ""
+            echo "Access Token: ${access_token}"
+            echo ""
+            echo "Full Response:"
             echo "${response}" | jq .
             echo ""
-            echo "Access Token (first 50 chars): ${access_token:0:50}..."
             return 0
         else
             log_error "Login failed"

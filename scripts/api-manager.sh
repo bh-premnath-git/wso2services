@@ -307,6 +307,30 @@ cmd_create_api() {
 }
 EOF
     
+    # Check if API already exists
+    log_info "Checking if API already exists..."
+    local search_response
+    search_response=$(curl_with_retry -k -sS -u "${APIM_ADMIN_USER}:${APIM_ADMIN_PASS}" \
+        "${PUBLISHER_API}/apis?query=name:${api_name}%20version:${version}" 2>/dev/null)
+    
+    local existing_api_id=$(echo "${search_response}" | jq -r '.list[]? | select(.name == "'"${api_name}"'" and .version == "'"${version}"'") | .id' 2>/dev/null | head -1)
+    
+    if [ -n "${existing_api_id}" ] && [ "${existing_api_id}" != "null" ]; then
+        log_warn "API already exists with ID: ${existing_api_id}"
+        echo ""
+        echo "API ID: ${existing_api_id}"
+        echo "Name: ${api_name}"
+        echo "Version: ${version}"
+        echo "Context: ${context}"
+        echo ""
+        
+        # Store API ID
+        local temp_file=$(create_temp_file "api_manager_last_api")
+        echo "${existing_api_id}" > "${temp_file}"
+        ln -sf "${temp_file}" /tmp/api_manager_last_api_id.txt
+        return 0
+    fi
+    
     log_info "Creating API..."
     local response
     response=$(curl_with_retry -k -sS -u "${APIM_ADMIN_USER}:${APIM_ADMIN_PASS}" \
