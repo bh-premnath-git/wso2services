@@ -13,7 +13,7 @@ type = "database_unique_id"
 
 [database.identity_db]
 type = "mysql"
-url = "jdbc:mysql://mysql-wso2:3306/WSO2_IDENTITY_DB?useSSL=false&amp;allowPublicKeyRetrieval=true"
+url = "jdbc:mysql://mysql-wso2:3306/WSO2_IDENTITY_DB?useSSL=false&amp;allowPublicKeyRetrieval=true&amp;characterEncoding=UTF-8&amp;connectionCollation=utf8mb4_unicode_ci"
 username = "wso2carbon"
 password = "wso2carbon"
 driver = "com.mysql.cj.jdbc.Driver"
@@ -21,7 +21,7 @@ validationQuery = "SELECT 1"
 
 [database.shared_db]
 type = "mysql"
-url = "jdbc:mysql://mysql-wso2:3306/WSO2_SHARED_DB?useSSL=false&amp;allowPublicKeyRetrieval=true"
+url = "jdbc:mysql://mysql-wso2:3306/WSO2_SHARED_DB?useSSL=false&amp;allowPublicKeyRetrieval=true&amp;characterEncoding=UTF-8&amp;connectionCollation=utf8mb4_unicode_ci"
 username = "wso2carbon"
 password = "wso2carbon"
 driver = "com.mysql.cj.jdbc.Driver"
