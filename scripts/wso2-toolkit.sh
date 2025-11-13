@@ -178,15 +178,15 @@ cmd_health() {
     local errors=0
     
     log_info "Checking Docker containers..."
-    if docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "wso2am|wso2is|postgres"; then
+    if docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "wso2am|wso2is|mysql"; then
         echo ""
     else
         ((errors++))
     fi
     
-    log_info "Checking PostgreSQL databases..."
-    for db in apim_db shared_db identity_db shared_db_is; do
-        if docker exec postgres-wso2 psql -U wso2carbon -d ${db} -c "SELECT 1;" >/dev/null 2>&1; then
+    log_info "Checking MySQL databases..."
+    for db in WSO2AM_DB WSO2_IDENTITY_DB WSO2_SHARED_DB; do
+        if docker exec mysql-wso2 mysql -uroot -proot -e "USE ${db}; SELECT 1;" >/dev/null 2>&1; then
             log_success "Database '${db}' OK"
         else
             log_error "Database '${db}' FAILED"
@@ -358,7 +358,7 @@ cmd_setup_km() {
     "validation_enable": true,
     "self_validate_jwt": true,
     "api_resource_mgt_endpoint": ("https://" + $is_host + ":" + $is_port + "/api/server/v1/api-resources"),
-    "roles_endpoint": ("https://" + $is_host + ":" + $is_port + "/scim2/Roles")
+    "roles_endpoint": ("https://" + $is_host + ":" + $is_port + "/scim2/v2/Roles")
   }
 }')
     
@@ -1468,6 +1468,230 @@ cmd_create_roles() {
 }
 
 ################################################################################
+# COMMAND: assign-role - Assign role to user
+################################################################################
+
+cmd_assign_role() {
+    local username=${1:-}
+    local role_name=${2:-}
+    
+    if [ -z "${username}" ] || [ -z "${role_name}" ]; then
+        log_error "Usage: $0 assign-role <username> <role_name>"
+        echo ""
+        echo "Examples:"
+        echo "  $0 assign-role john user"
+        echo "  $0 assign-role admin ops_users"
+        return 1
+    fi
+    
+    check_dependencies || return 1
+    check_container "wso2is" || return 1
+    
+    echo ""
+    echo "=========================================="
+    echo "  Assign Role to User"
+    echo "=========================================="
+    echo ""
+    
+    local scim_api="https://localhost:${WSO2IS_EXTERNAL_PORT}/scim2"
+    
+    # Step 1: Get user ID
+    log_info "Finding user '${username}'..."
+    local encoded_username=$(echo -n "${username}" | jq -sRr @uri)
+    
+    local user_response
+    user_response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+        "${scim_api}/Users?filter=userName%20eq%20${encoded_username}" 2>&1)
+    
+    if [ $? -ne 0 ]; then
+        log_error "Failed to connect to Identity Server"
+        return 1
+    fi
+    
+    local user_id=$(echo "${user_response}" | jq -r '.Resources[0].id // empty' 2>/dev/null)
+    
+    if [ -z "${user_id}" ]; then
+        log_error "User '${username}' not found"
+        return 1
+    fi
+    
+    log_info "Found user ID: ${user_id}"
+    
+    # Step 2: Get role ID
+    log_info "Finding role '${role_name}'..."
+    local encoded_role=$(echo -n "${role_name}" | jq -sRr @uri)
+    
+    local role_response
+    role_response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+        "${scim_api}/Roles?filter=displayName%20eq%20${encoded_role}" 2>&1)
+    
+    if [ $? -ne 0 ]; then
+        log_error "Failed to fetch roles"
+        return 1
+    fi
+    
+    local role_id=$(echo "${role_response}" | jq -r '.Resources[0].id // empty' 2>/dev/null)
+    
+    if [ -z "${role_id}" ]; then
+        log_error "Role '${role_name}' not found"
+        echo ""
+        echo "Available roles:"
+        echo "${role_response}" | jq -r '.Resources[]?.displayName // empty' 2>/dev/null | sed 's/^/  - /'
+        echo ""
+        echo "Create role with: $0 create-role ${role_name}"
+        return 1
+    fi
+    
+    log_info "Found role ID: ${role_id}"
+    
+    # Step 3: Assign role to user using PATCH
+    log_info "Assigning role '${role_name}' to user '${username}'..."
+    
+    local payload
+    payload=$(jq -n \
+        --arg uid "${user_id}" \
+        --arg uname "${username}" \
+        '{
+            schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            Operations: [{
+                op: "add",
+                path: "users",
+                value: [{
+                    value: $uid,
+                    display: $uname
+                }]
+            }]
+        }')
+    
+    local response
+    response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+        -H "Content-Type: application/json" \
+        -d "${payload}" \
+        -X PATCH "${scim_api}/Roles/${role_id}" 2>&1)
+    
+    if echo "${response}" | jq -e '.id' >/dev/null 2>&1; then
+        log_success "Role assigned successfully!"
+        echo ""
+        echo "User: ${username}"
+        echo "Role: ${role_name}"
+        echo ""
+        return 0
+    else
+        # Check if user already has the role
+        if echo "${response}" | grep -qi "already"; then
+            log_warn "User '${username}' already has role '${role_name}'"
+            return 0
+        fi
+        
+        log_error "Failed to assign role"
+        echo "${response}" | jq . 2>/dev/null || echo "${response}"
+        return 1
+    fi
+}
+
+################################################################################
+# COMMAND: remove-role - Remove role from user
+################################################################################
+
+cmd_remove_role() {
+    local username=${1:-}
+    local role_name=${2:-}
+    
+    if [ -z "${username}" ] || [ -z "${role_name}" ]; then
+        log_error "Usage: $0 remove-role <username> <role_name>"
+        echo ""
+        echo "Examples:"
+        echo "  $0 remove-role john user"
+        echo "  $0 remove-role admin ops_users"
+        return 1
+    fi
+    
+    check_dependencies || return 1
+    check_container "wso2is" || return 1
+    
+    echo ""
+    echo "=========================================="
+    echo "  Remove Role from User"
+    echo "=========================================="
+    echo ""
+    
+    local scim_api="https://localhost:${WSO2IS_EXTERNAL_PORT}/scim2"
+    
+    # Step 1: Get user ID
+    log_info "Finding user '${username}'..."
+    local encoded_username=$(echo -n "${username}" | jq -sRr @uri)
+    
+    local user_response
+    user_response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+        "${scim_api}/Users?filter=userName%20eq%20${encoded_username}" 2>&1)
+    
+    if [ $? -ne 0 ]; then
+        log_error "Failed to connect to Identity Server"
+        return 1
+    fi
+    
+    local user_id=$(echo "${user_response}" | jq -r '.Resources[0].id // empty' 2>/dev/null)
+    
+    if [ -z "${user_id}" ]; then
+        log_error "User '${username}' not found"
+        return 1
+    fi
+    
+    # Step 2: Get role ID
+    log_info "Finding role '${role_name}'..."
+    local encoded_role=$(echo -n "${role_name}" | jq -sRr @uri)
+    
+    local role_response
+    role_response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+        "${scim_api}/Roles?filter=displayName%20eq%20${encoded_role}" 2>&1)
+    
+    if [ $? -ne 0 ]; then
+        log_error "Failed to fetch roles"
+        return 1
+    fi
+    
+    local role_id=$(echo "${role_response}" | jq -r '.Resources[0].id // empty' 2>/dev/null)
+    
+    if [ -z "${role_id}" ]; then
+        log_error "Role '${role_name}' not found"
+        return 1
+    fi
+    
+    # Step 3: Remove role from user
+    log_info "Removing role '${role_name}' from user '${username}'..."
+    
+    local payload
+    payload=$(jq -n \
+        --arg uid "${user_id}" \
+        '{
+            schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+            Operations: [{
+                op: "remove",
+                path: "users[value eq " + $uid + "]"
+            }]
+        }')
+    
+    local response
+    response=$(curl -k -sS -u "${WSO2IS_ADMIN_USER}:${WSO2IS_ADMIN_PASS}" \
+        -H "Content-Type: application/json" \
+        -d "${payload}" \
+        -X PATCH "${scim_api}/Roles/${role_id}" 2>&1)
+    
+    if echo "${response}" | jq -e '.id' >/dev/null 2>&1; then
+        log_success "Role removed successfully!"
+        echo ""
+        echo "User: ${username}"
+        echo "Role: ${role_name}"
+        echo ""
+        return 0
+    else
+        log_error "Failed to remove role"
+        echo "${response}" | jq . 2>/dev/null || echo "${response}"
+        return 1
+    fi
+}
+
+################################################################################
 # COMMAND: delete-role - Delete a role
 ################################################################################
 
@@ -1889,6 +2113,8 @@ COMMANDS:
   list-roles          List all roles
   create-role         Create a single role
   create-roles        Create default roles (ops_users, finance, auditor, user, app_admin)
+  assign-role         Assign role to user
+  remove-role         Remove role from user
   delete-role         Delete a role by ID
 
   Token Generation:
@@ -1948,6 +2174,12 @@ EXAMPLES:
 
   # List all roles
   ./wso2-toolkit.sh list-roles
+
+  # Assign role to user
+  ./wso2-toolkit.sh assign-role john user
+
+  # Remove role from user
+  ./wso2-toolkit.sh remove-role john user
 
   Token Generation:
   -----------------
@@ -2034,6 +2266,14 @@ case "${COMMAND}" in
         ;;
     create-roles)
         cmd_create_roles
+        ;;
+    assign-role)
+        shift
+        cmd_assign_role "$@"
+        ;;
+    remove-role)
+        shift
+        cmd_remove_role "$@"
         ;;
     delete-role)
         shift

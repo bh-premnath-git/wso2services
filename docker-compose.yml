@@ -217,8 +217,6 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=forex-service
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       redpanda:
@@ -325,8 +323,6 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=ledger-service
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       redpanda:
@@ -367,14 +363,12 @@ services:
       - WALLET_SERVICE_URL=http://wallet-service:8006
       - RULE_ENGINE_SERVICE_URL=http://rule-engine-service:8005
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       redpanda:
         condition: service_healthy
       dynamodb-local:
-        condition: service_started
+        condition: service_healthy
       otel-collector:
         condition: service_started
       forex-service:
@@ -422,8 +416,6 @@ services:
       - KYC_CANCEL_URL=${KYC_CANCEL_URL:-http://localhost:8083/kyc/cancel}
       - KYC_WEBHOOK_URL=${KYC_WEBHOOK_URL:-http://localhost:8004/webhooks/complycube}
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       redpanda:
@@ -467,8 +459,6 @@ services:
       - BRMS_PROJECT_ID=${BRMS_PROJECT_ID:-}
       - BRMS_TOKEN=${BRMS_TOKEN:-}
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       redpanda:
@@ -506,8 +496,6 @@ services:
       - OTEL_SERVICE_NAME=wallet-service
       - LEDGER_SERVICE_URL=http://ledger-service:8002
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       redpanda:

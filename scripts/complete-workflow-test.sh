@@ -237,10 +237,15 @@ step6_register_activate_user() {
         log_warn "User might already be activated"
     fi
     
-    log_step "6.3" "Verifying user details..."
+    log_step "6.3" "Assigning role '${TEST_ROLE}' to user..."
+    if ! "${TOOLKIT}" assign-role "${TEST_USER}" "${TEST_ROLE}"; then
+        log_warn "Role assignment might have failed or already exists"
+    fi
+    
+    log_step "6.4" "Verifying user details..."
     "${USER_MANAGER}" get-user "${TEST_USER}"
     
-    log_success "Step 6 completed - User registered and activated"
+    log_success "Step 6 completed - User registered, activated, and role assigned"
 }
 
 ################################################################################
