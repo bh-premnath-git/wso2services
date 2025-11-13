@@ -1,24 +1,23 @@
 services:
   postgres:
-    image: postgres:18.0
-    container_name: postgres-wso2
+    image: mysql:8.0.44
+    container_name: mysql-wso2
     env_file:
       - .env
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_MAX_CONNECTIONS: ${POSTGRES_MAX_CONNECTIONS}
-    command: >
-      postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS}
-               -c shared_buffers=256MB
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ulimits:
+      nofile:
+        soft: 20000
+        hard: 40000
+    command: [--ssl=0]
     volumes:
-      - ./conf/postgres/scripts:/docker-entrypoint-initdb.d:ro
-      - postgres-data:/var/lib/postgresql/data
+      - ./conf/mysql/scripts:/docker-entrypoint-initdb.d
+      - ./conf/mysql/conf/my.cnf:/etc/mysql/mysql.conf.d/my.cnf
     ports:
-      - "5432:5432"
+      - "3306:3306"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      test: ["CMD", "sh", "-c", "mysqladmin ping -uroot -proot && [ -f /var/lib/mysql/initialization-complete.flag ]"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -40,11 +39,10 @@ services:
     environment:
       - JAVA_OPTS=-Xms512m -Xmx2048m
     volumes:
-      - ./wso2am/lib/postgresql-42.7.4.jar:/home/wso2carbon/wso2am-4.5.0/repository/components/lib/postgresql-42.7.4.jar
-      - ./wso2am/repository/conf/deployment.toml:/home/wso2carbon/wso2am-4.5.0/repository/conf/deployment.toml
-      - ./wso2am/repository/resources/security/tokenstore/:/home/wso2carbon/wso2am-4.5.0/repository/resources/security/tokenstore/
-      - ./wso2am/repository/resources/security/wso2carbon.jks:/home/wso2carbon/wso2am-4.5.0/repository/resources/security/wso2carbon.jks
-      - ./wso2am/repository/resources/security/client-truststore.jks:/home/wso2carbon/wso2am-4.5.0/repository/resources/security/client-truststore.jks
+      - ./wso2am/repository/conf/deployment.toml:/home/wso2carbon/wso2am-4.6.0/repository/conf/deployment.toml
+      - ./wso2am/repository/resources/security/tokenstore/:/home/wso2carbon/wso2am-4.6.0/repository/resources/security/tokenstore/
+      - ./wso2am/repository/resources/security/wso2carbon.jks:/home/wso2carbon/wso2am-4.6.0/repository/resources/security/wso2carbon.jks
+      - ./wso2am/repository/resources/security/client-truststore.jks:/home/wso2carbon/wso2am-4.6.0/repository/resources/security/client-truststore.jks
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,12 +64,11 @@ services:
     environment:
       - JAVA_OPTS=-Xms512m -Xmx2048m
     volumes:
-      - ./wso2is/lib/postgresql-42.7.4.jar:/home/wso2carbon/wso2is-7.1.0/repository/components/lib/postgresql-42.7.4.jar
-      - ./wso2is/repository/conf/deployment.toml:/home/wso2carbon/wso2is-7.1.0/repository/conf/deployment.toml
-      - ./wso2is/repository/components/dropins/wso2is.notification.event.handlers-2.0.8.jar:/home/wso2carbon/wso2is-7.1.0/repository/components/dropins/wso2is.notification.event.handlers-2.0.8.jar
-      - ./wso2is/repository/resources/security/tokenstore/:/home/wso2carbon/wso2is-7.1.0/repository/resources/security/tokenstore/
-      - ./wso2is/repository/resources/security/wso2carbon.p12:/home/wso2carbon/wso2is-7.1.0/repository/resources/security/wso2carbon.p12
-      - ./wso2is/repository/resources/security/client-truststore.p12:/home/wso2carbon/wso2is-7.1.0/repository/resources/security/client-truststore.p12
+      - ./wso2is/repository/conf/deployment.toml:/home/wso2carbon/wso2is-7.2.0/repository/conf/deployment.toml
+      - ./wso2is/repository/components/dropins/wso2is.notification.event.handlers-2.0.8.jar:/home/wso2carbon/wso2is-7.2.0/repository/components/dropins/wso2is.notification.event.handlers-2.0.8.jar
+      - ./wso2is/repository/resources/security/tokenstore/:/home/wso2carbon/wso2is-7.2.0/repository/resources/security/tokenstore/
+      - ./wso2is/repository/resources/security/wso2carbon.p12:/home/wso2carbon/wso2is-7.2.0/repository/resources/security/wso2carbon.p12
+      - ./wso2is/repository/resources/security/client-truststore.p12:/home/wso2carbon/wso2is-7.2.0/repository/resources/security/client-truststore.p12
     depends_on:
       postgres:
         condition: service_healthy
@@ -458,6 +455,8 @@ services:
     container_name: rule-engine-service
     ports:
       - "8005:8005"
+    env_file:
+      - .env
     environment:
       - SERVICE_NAME=rule_engine_service
       - SERVICE_PORT=8005
@@ -467,6 +466,11 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=rule-engine-service
+      # BRMS Integration (set BRMS_ENABLED=true in .env to enable)
+      - BRMS_ENABLED=${BRMS_ENABLED:-false}
+      - BRMS_URL=${BRMS_URL:-http://brms:80}
+      - BRMS_PROJECT_ID=${BRMS_PROJECT_ID:-}
+      - BRMS_TOKEN=${BRMS_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -477,6 +481,8 @@ services:
       dynamodb-local:
         condition: service_started
       otel-collector:
+        condition: service_started
+      brms:
         condition: service_started
     networks:
       - payment-network
@@ -584,6 +590,50 @@ services:
       retries: 3
       start_period: 40s
 
+  pg-database:
+    image: postgres:18.0
+    container_name: pg-database
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${BRMS_DB_USER}
+      POSTGRES_PASSWORD: ${BRMS_DB_PASSWORD}
+      POSTGRES_DB: ${BRMS_DB_NAME}
+    ports:
+      - "5433:5432"
+    volumes:
+      - brms-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - payment-network
+    restart: unless-stopped
+
+  brms:
+    image: gorules/brms:latest
+    container_name: brms
+    env_file:
+      - .env
+    ports:
+      - "9080:80"
+    depends_on:
+      pg-database:
+        condition: service_healthy
+    environment:
+      DB_HOST: pg-database
+      DB_PORT: 5432
+      DB_USER: ${BRMS_DB_USER}
+      DB_PASSWORD: ${BRMS_DB_PASSWORD}
+      DB_NAME: ${BRMS_DB_NAME}
+      DB_SSL_DISABLED: true
+      LICENSE_KEY: ${BRMS_LICENSE_KEY}
+    networks:
+      - payment-network
+    restart: unless-stopped
+
 networks:
   payment-network:
     driver: bridge
@@ -593,3 +643,4 @@ volumes:
   dynamodb-data:
   redis-data:
   redpanda-data:
+  brms-postgres-data:

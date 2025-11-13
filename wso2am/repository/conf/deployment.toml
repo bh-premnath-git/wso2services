@@ -14,19 +14,19 @@ create_admin_account = true
 type = "database_unique_id"
 
 [database.apim_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/apim_db"
+type = "mysql"
+url = "jdbc:mysql://mysql-wso2:3306/WSO2AM_DB?useSSL=false&amp;allowPublicKeyRetrieval=true"
 username = "wso2carbon"
 password = "wso2carbon"
-driver = "org.postgresql.Driver"
+driver = "com.mysql.cj.jdbc.Driver"
 validationQuery = "SELECT 1"
 
 [database.shared_db]
-type = "postgre"
-url = "jdbc:postgresql://postgres:5432/shared_db"
+type = "mysql"
+url = "jdbc:mysql://mysql-wso2:3306/WSO2_SHARED_DB?useSSL=false&amp;allowPublicKeyRetrieval=true"
 username = "wso2carbon"
 password = "wso2carbon"
-driver = "org.postgresql.Driver"
+driver = "com.mysql.cj.jdbc.Driver"
 validationQuery = "SELECT 1"
 
 [keystore.tls]

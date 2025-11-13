@@ -723,8 +723,8 @@ EXAMPLES:
   ./wso2is-user.sh reset-password john newPassword123
 
   # Activate/Deactivate
-  ./wso2is-user.sh activate-user john activate
-  ./wso2is-user.sh activate-user john deactivate
+  ./wso2is-user.sh activate-user john
+  ./wso2is-user.sh deactivate-user john
 
   # List all users
   ./wso2is-user.sh list-users
