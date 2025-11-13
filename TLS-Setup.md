@@ -89,6 +89,17 @@ file wso2is/repository/resources/security/wso2carbon.p12
 file wso2is/repository/resources/security/client-truststore.p12
 
 echo "Preflight OK."
+
+# 7) Verify mkcert root CA is in truststores
+echo "Verifying mkcert root CA in truststores..."
+docker run --rm -v "$PWD:/work" -w /work eclipse-temurin:17-jdk bash -lc '
+  keytool -list -keystore wso2am/repository/resources/security/client-truststore.jks \
+    -storepass wso2carbon -alias mkcert-local-root || echo "WARNING: mkcert root CA not found in WSO2 AM truststore"
+'
+docker run --rm -v "$PWD:/work" -w /work eclipse-temurin:17-jdk bash -lc '
+  keytool -list -keystore wso2is/repository/resources/security/client-truststore.p12 \
+    -storepass wso2carbon -alias mkcert-local-root || echo "WARNING: mkcert root CA not found in WSO2 IS truststore"
+'
 ▶️ Bring up & verify
 bash
 Copy code
