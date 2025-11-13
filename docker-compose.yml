@@ -1,5 +1,5 @@
 services:
-  postgres:
+  mysql:
     image: mysql:8.0.44
     container_name: mysql-wso2
     env_file:
@@ -44,7 +44,7 @@ services:
       - ./wso2am/repository/resources/security/wso2carbon.jks:/home/wso2carbon/wso2am-4.6.0/repository/resources/security/wso2carbon.jks
       - ./wso2am/repository/resources/security/client-truststore.jks:/home/wso2carbon/wso2am-4.6.0/repository/resources/security/client-truststore.jks
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     networks:
       payment-network:
@@ -70,7 +70,7 @@ services:
       - ./wso2is/repository/resources/security/wso2carbon.p12:/home/wso2carbon/wso2is-7.2.0/repository/resources/security/wso2carbon.p12
       - ./wso2is/repository/resources/security/client-truststore.p12:/home/wso2carbon/wso2is-7.2.0/repository/resources/security/client-truststore.p12
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     networks:
       payment-network:
@@ -205,7 +205,6 @@ services:
     environment:
       - SERVICE_NAME=forex_service
       - SERVICE_PORT=8001
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_db
       - REDIS_URL=redis://:redis-secret@redis:6379/0
       - FOREX_REDIS_URL=redis://:redis-secret@redis:6379/1
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
@@ -218,7 +217,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=forex-service
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -320,14 +319,13 @@ services:
     environment:
       - SERVICE_NAME=ledger_service
       - SERVICE_PORT=8002
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ledger_db
       - REDIS_URL=redis://:redis-secret@redis:6379/1
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=ledger-service
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -359,7 +357,6 @@ services:
     environment:
       - SERVICE_NAME=payment_service
       - SERVICE_PORT=8003
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/payment_db
       - REDIS_URL=redis://:redis-secret@redis:6379/2
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
@@ -370,7 +367,7 @@ services:
       - WALLET_SERVICE_URL=http://wallet-service:8006
       - RULE_ENGINE_SERVICE_URL=http://rule-engine-service:8005
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -410,7 +407,6 @@ services:
     environment:
       - SERVICE_NAME=profile_service
       - SERVICE_PORT=8004
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/profile_db
       - REDIS_URL=redis://:redis-secret@redis:6379/3
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
@@ -426,7 +422,7 @@ services:
       - KYC_CANCEL_URL=${KYC_CANCEL_URL:-http://localhost:8083/kyc/cancel}
       - KYC_WEBHOOK_URL=${KYC_WEBHOOK_URL:-http://localhost:8004/webhooks/complycube}
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -460,7 +456,6 @@ services:
     environment:
       - SERVICE_NAME=rule_engine_service
       - SERVICE_PORT=8005
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/rule_engine_db
       - REDIS_URL=redis://:redis-secret@redis:6379/4
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
@@ -472,7 +467,7 @@ services:
       - BRMS_PROJECT_ID=${BRMS_PROJECT_ID:-}
       - BRMS_TOKEN=${BRMS_TOKEN:-}
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -504,7 +499,6 @@ services:
     environment:
       - SERVICE_NAME=wallet_service
       - SERVICE_PORT=8006
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/wallet_db
       - REDIS_URL=redis://:redis-secret@redis:6379/5
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
@@ -512,7 +506,7 @@ services:
       - OTEL_SERVICE_NAME=wallet-service
       - LEDGER_SERVICE_URL=http://ledger-service:8002
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       redis:
         condition: service_healthy

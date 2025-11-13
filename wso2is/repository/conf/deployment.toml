@@ -166,3 +166,16 @@ password = "${admin.password}"
 # Optional: Role management from APIM (requires update levels ≥ 4.4.0.5 / 7.0.0.81)
 [role_mgt]
 allow_system_prefix_for_role = true
+
+[[datasource]]
+id = "AgentIdentity"
+url = "jdbc:mysql://mysql:3306/WSO2_IDENTITY_DB?useSSL=false&allowPublicKeyRetrieval=true"
+username = "wso2carbon"
+password = "wso2carbon"
+driver = "com.mysql.cj.jdbc.Driver"
+pool_options.maxActive = 50
+pool_options.maxWait = 60000
+pool_options.minIdle = 5
+pool_options.testOnBorrow = true
+pool_options.validationQuery = "SELECT 1"
+pool_options.validationInterval = 30000
