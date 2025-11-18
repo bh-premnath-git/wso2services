@@ -1,0 +1,169 @@
+[server]
+hostname = "is-as-km"
+node_ip = "127.0.0.1"
+base_path = "https://$ref{server.hostname}:${carbon.management.port}"
+
+[super_admin]
+username = "admin"
+password = "admin"
+create_admin_account = true
+
+[user_store]
+type = "database_unique_id"
+
+[role_mgt]
+allow_system_prefix_for_role = true
+
+[database.identity_db]
+type = "mysql"
+url = "jdbc:mysql://mysql:3306/WSO2_IS_DB?useSSL=false&amp;allowPublicKeyRetrieval=true&amp;autoReconnect=true"
+username = "wso2carbon"
+password = "wso2carbon"
+driver = "com.mysql.cj.jdbc.Driver"
+
+[database.shared_db]
+type = "mysql"
+url = "jdbc:mysql://mysql:3306/WSO2_IS_SHARED_DB?useSSL=false&amp;allowPublicKeyRetrieval=true&amp;autoReconnect=true"
+username = "wso2carbon"
+password = "wso2carbon"
+driver = "com.mysql.cj.jdbc.Driver"
+
+[keystore.primary]
+file_name = "wso2carbon.p12"
+password = "wso2carbon"
+type="PKCS12"
+
+[truststore]
+file_name="client-truststore.p12"
+password="wso2carbon"
+type="PKCS12"
+
+[account_recovery.endpoint.auth]
+hash= "66cd9688a2ae068244ea01e70f0e230f5623b7fa4cdecb65070a09ec06452262"
+
+[identity.auth_framework.endpoint]
+app_password= "dashboard"
+
+[event.default_listener.validation]
+priority = 3
+enable = false
+
+# The KeyStore which is used for encrypting/decrypting internal data. By default the primary keystore is used as the internal keystore.
+
+#[keystore.internal]
+#file_name = "$ref{keystore.primary.file_name}"
+#type = "$ref{keystore.primary.type}"
+#password = "$ref{keystore.primary.password}"
+#alias = "$ref{keystore.primary.alias}"
+#key_password = "$ref{keystore.primary.key_password}"
+
+# The KeyStore which is used for tls communication. By default the primary keystore is used as the tls keystore.
+
+#[keystore.tls]
+#file_name = "$ref{keystore.primary.file_name}"
+#type = "$ref{keystore.primary.type}"
+#password = "$ref{keystore.primary.password}"
+#alias = "$ref{keystore.primary.alias}"
+#key_password = "$ref{keystore.primary.key_password}"
+
+#Google reCAPTCHA settings.
+
+#[recaptcha]
+#enabled = true
+#api_url = "https://www.google.com/recaptcha/api.js"
+#verify_url = "https://www.google.com/recaptcha/api/siteverify"
+#site_key = ""
+#secret_key = ""
+
+# SMTP email sender settings.
+#[output_adapter.email]
+#from_address= "abcd@gmail.com"
+#username= "abcd"
+#password= "xxxx"
+#hostname= "smtp.gmail.com"
+#port= 587
+
+# Disable password input validation to allow any password format
+[event.default_listener.identity_mgt]
+priority = 50
+enable = false
+
+[event.default_listener.governance_identity_mgt]
+priority = 95
+enable = false
+
+[event.default_listener.workflow]
+priority = 10
+enable = false
+
+[event.default_listener.scim]
+priority = 90
+enable = false
+
+[event.default_listener.scim_tenant_mgt]
+priority = 90
+enable = false
+
+[event.default_listener.scim2]
+priority = 93
+enable = true
+
+[event.default_listener.scim2_tenant_mgt]
+priority = 93
+enable = false
+
+[event.default_listener.governance_identity_store]
+priority = 97
+enable = true
+data_store = "org.wso2.carbon.identity.governance.store.JDBCIdentityDataStore"
+enable_hybrid_data_store = false
+
+[event.default_listener.application_authentication]
+priority = 11
+enable = false
+
+[event.default_listener.oauth_listener]
+priority = 11
+enable = false
+
+[event.default_listener.mutual_tls_authenticator]
+priority = 5
+enable = true
+
+[event.default_listener.basic_auth_client_authenticator]
+priority = 10
+enable = true
+
+[event.default_listener.user_deletion]
+priority = 98
+enable = true
+
+[event.default_listener.consent_mgt_handler]
+priority = 100
+enable = true
+
+[event.default_listener.user_session_termination]
+priority = 99
+enable = true
+
+[oauth]
+authorize_all_scopes = true
+
+[[resource.access_control]]
+context="(.*)/scim2/Me"
+secure=true
+http_method="GET"
+cross_tenant=true
+permissions=[]
+scopes=[]
+
+[[event_listener]]
+id = "token_revocation"
+type = "org.wso2.carbon.identity.core.handler.AbstractIdentityHandler"
+name = "org.wso2.is.notification.ApimOauthEventInterceptor"
+order = 1
+[event_listener.properties]
+notification_endpoint = "https://api-manager:9443/internal/data/v1/notify"
+username = "${admin.username}"
+password = "${admin.password}"
+'header.X-WSO2-KEY-MANAGER' = "WSO2IS"
