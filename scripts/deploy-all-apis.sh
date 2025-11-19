@@ -64,6 +64,26 @@ for api_name in "${api_names[@]}"; do
     fi
     
     API_ID=$(echo "$API_DATA" | jq -r '.id')
+    LIFECYCLE=$(echo "$API_DATA" | jq -r '.lifeCycleStatus')
+    
+    # Publish API if not already published
+    if [ "$LIFECYCLE" != "PUBLISHED" ]; then
+        echo "  → API in ${LIFECYCLE} state, publishing..."
+        PUBLISH_RESPONSE=$(curl -k -sS -X POST \
+            "https://${APIM_HOST}:${APIM_PORT}/api/am/publisher/v4/apis/change-lifecycle?apiId=${API_ID}&action=Publish" \
+            -u "${ADMIN_USER}:${ADMIN_PASS}" \
+            -H "Content-Type: application/json")
+        
+        if echo "$PUBLISH_RESPONSE" | jq -e '.lifeCycleStatus' >/dev/null 2>&1; then
+            NEW_STATE=$(echo "$PUBLISH_RESPONSE" | jq -r '.lifeCycleStatus')
+            echo "  ✓ API published (State: ${NEW_STATE})"
+        else
+            echo "  ⚠ Failed to publish ${api_name}, attempting deployment anyway..."
+            echo "$PUBLISH_RESPONSE" | jq . 2>/dev/null || echo "$PUBLISH_RESPONSE"
+        fi
+    else
+        echo "  ✓ API already published"
+    fi
     
     # Check current deployment status
     DEPLOYMENTS=$(curl -k -sS "https://${APIM_HOST}:${APIM_PORT}/api/am/publisher/v4/apis/${API_ID}/deployments" \

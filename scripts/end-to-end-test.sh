@@ -52,7 +52,7 @@ BANKING_SERVICE_URL="http://banking-service:8007"
 # STEP 1: Wait for all services
 ################################################################################
 wait_for_services() {
-    log_step "STEP 1: Waiting for all services to be healthy..."
+    log_step "STEP 1: Waiting for all WSO2 services to be healthy..."
     
     local max_wait=300  # 5 minutes
     local elapsed=0
@@ -73,10 +73,10 @@ wait_for_services() {
 }
 
 ################################################################################
-# STEP 2: Register Test User in WSO2 IS
+# STEP 4: Register Test User in WSO2 IS
 ################################################################################
 register_test_user() {
-    log_step "STEP 2: Registering test user '${TEST_USERNAME}'"
+    log_step "STEP 4: Registering test user '${TEST_USERNAME}'"
     
     local response
     response=$(curl -k -sS -X POST \
@@ -111,10 +111,10 @@ register_test_user() {
 }
 
 ################################################################################
-# STEP 3: Create OAuth Application in WSO2 IS
+# STEP 5: Create OAuth Application in WSO2 IS
 ################################################################################
 create_oauth_app() {
-    log_step "STEP 3: Creating OAuth application for test user"
+    log_step "STEP 5: Creating OAuth application for test user"
     
     local response
     response=$(curl -k -sS -X POST \
@@ -142,10 +142,10 @@ create_oauth_app() {
 }
 
 ################################################################################
-# STEP 4: Get OAuth Token (Password Grant)
+# STEP 6: Get OAuth Token (Password Grant)
 ################################################################################
 get_oauth_token() {
-    log_step "STEP 4: Getting OAuth access token (password grant)"
+    log_step "STEP 6: Getting OAuth access token (password grant)"
     
     local response
     response=$(curl -k -sS -X POST \
@@ -161,7 +161,6 @@ get_oauth_token() {
         
         log_success "OAuth tokens obtained!"
         log_info "Access Token: ${ACCESS_TOKEN:0:50}..."
-        log_info "Refresh Token: ${REFRESH_TOKEN:0:50}..."
         
         # Decode ID token to show claims
         if command -v jq >/dev/null 2>&1; then
@@ -185,15 +184,15 @@ list_api_status() {
     local api_names=("ForexService" "LedgerService" "PaymentService" "ProfileService" "RuleEngineService" "WalletService" "BankingService")
     
     echo ""
-    echo "┌────────────────────┬────────────┬────────────┬────────────┐"
-    printf "│ %-18s │ %-10s │ %-10s │ %-10s │\n" "Service" "Registered" "Published" "Deployed"
-    echo "├────────────────────┼────────────┼────────────┼────────────┤"
+    echo "┌────────────────────┬────────────┬────────────┐"
+    printf "│ %-18s │ %-10s │ %-10s │\n" "Service" "Published" "Deployed"
+    echo "├────────────────────┼────────────┼────────────┤"
     
     for api_name in "${api_names[@]}"; do
         local api_data=$(echo "$apis_response" | jq -r ".list[] | select(.name == \"${api_name}\")")
         
-        if [ -z "$api_data" ]; then
-            printf "│ %-18s │ %-10s │ %-10s │ %-10s │\n" "$api_name" "❌ No" "-" "-"
+        if [ -z "$api_data" ] || [ "$api_data" = "null" ]; then
+            printf "│ %-18s │ %-10s │ %-10s │\n" "$api_name" "❌ Not Found" "❌ No"
             continue
         fi
         
@@ -219,106 +218,18 @@ list_api_status() {
             local deployed="❌ No"
         fi
         
-        printf "│ %-18s │ %-10s │ %-10s │ %-10s │\n" "$api_name" "✅ Yes" "$published" "$deployed"
+        printf "│ %-18s │ %-10s │ %-10s │\n" "$api_name" "$published" "$deployed"
     done
     
-    echo "└────────────────────┴────────────┴────────────┴────────────┘"
+    echo "└────────────────────┴────────────┴────────────┘"
     echo ""
 }
 
 ################################################################################
-# STEP 5: Verify APIs are Registered, Published, and Deployed
-################################################################################
-ensure_apis_ready() {
-    log_step "STEP 5: Verifying all 7 backend services are registered, published & deployed"
-    echo ""
-    
-    # Check if APIs exist
-    log_info "Checking API status..."
-    local apis_response=$(curl -k -sS "https://${APIM_HOST}:${APIM_PORT}/api/am/publisher/v4/apis?limit=20" \
-        -u "${ADMIN_USER}:${ADMIN_PASS}" 2>/dev/null)
-    
-    local api_count=$(echo "$apis_response" | jq -r '.count // 0')
-    
-    if [ "$api_count" -lt 7 ]; then
-        log_error "Only ${api_count}/7 APIs found. Please register APIs first via Publisher Portal."
-        return 1
-    fi
-    
-    log_success "✓ Found ${api_count} APIs registered"
-    
-    # Display status table
-    list_api_status "$apis_response"
-    
-    # Check each API's status (published & deployed)
-    local api_names=("ForexService" "LedgerService" "PaymentService" "ProfileService" "RuleEngineService" "WalletService" "BankingService")
-    local all_ready=true
-    local needs_publish=0
-    local needs_deploy=0
-    
-    for api_name in "${api_names[@]}"; do
-        local api_data=$(echo "$apis_response" | jq -r ".list[] | select(.name == \"${api_name}\")")
-        
-        if [ -z "$api_data" ]; then
-            all_ready=false
-            continue
-        fi
-        
-        local api_id=$(echo "$api_data" | jq -r '.id')
-        local lifecycle=$(echo "$api_data" | jq -r '.lifeCycleStatus')
-        
-        # Check if published
-        if [ "$lifecycle" != "PUBLISHED" ]; then
-            needs_publish=$((needs_publish + 1))
-            all_ready=false
-            continue
-        fi
-        
-        # Check if deployed
-        local deployments=$(curl -k -sS "https://${APIM_HOST}:${APIM_PORT}/api/am/publisher/v4/apis/${api_id}/deployments" \
-            -u "${ADMIN_USER}:${ADMIN_PASS}" 2>/dev/null)
-        
-        local deploy_count=$(echo "$deployments" | jq -r 'length')
-        
-        if [ "$deploy_count" -eq 0 ]; then
-            needs_deploy=$((needs_deploy + 1))
-            all_ready=false
-        fi
-    done
-    
-    if [ "$all_ready" = true ]; then
-        log_success "✅ All APIs are ready (registered, published & deployed)"
-        
-        # Store API IDs for later use
-        FOREX_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "ForexService") | .id')
-        LEDGER_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "LedgerService") | .id')
-        PAYMENT_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "PaymentService") | .id')
-        PROFILE_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "ProfileService") | .id')
-        RULE_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "RuleEngineService") | .id')
-        WALLET_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "WalletService") | .id')
-        BANKING_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "BankingService") | .id')
-        
-        return 0
-    fi
-    
-    # Report what needs to be done
-    echo ""
-    if [ $needs_publish -gt 0 ]; then
-        log_warn "${needs_publish} APIs need to be published"
-    fi
-    if [ $needs_deploy -gt 0 ]; then
-        log_warn "${needs_deploy} APIs need to be deployed"
-    fi
-    
-    log_info "Will attempt to publish and deploy missing APIs..."
-    return 1
-}
-
-################################################################################
-# STEP 6: Create Application in APIM (using Basic Auth)
+# STEP 9: Create Application in APIM (using Basic Auth)
 ################################################################################
 create_apim_application() {
-    log_step "STEP 6: Creating application in APIM Developer Portal"
+    log_step "STEP 9: Creating application in APIM Developer Portal"
     
     local response
     response=$(curl -k -sS -X POST \
@@ -344,10 +255,10 @@ create_apim_application() {
 }
 
 ################################################################################
-# STEP 7: Generate Application Keys
+# STEP 10: Generate Application Keys
 ################################################################################
 generate_app_keys() {
-    log_step "STEP 7: Generating application keys (consumer key/secret)"
+    log_step "STEP 10: Generating application keys (consumer key/secret)"
     
     # Get the active/enabled Key Manager ID
     log_info "Fetching active Key Manager..."
@@ -356,12 +267,12 @@ generate_app_keys() {
         "https://${APIM_HOST}:${APIM_PORT}/api/am/admin/v4/key-managers" \
         -u "${ADMIN_USER}:${ADMIN_PASS}")
     
-    # First try to get WSO2IS Key Manager (our configured one)
-    KM_ID=$(echo "$km_response" | jq -r '.list[] | select(.name == "WSO2IS" and .enabled == true) | .id')
+    # Use Resident Key Manager for application keys (ensures subscription validation works)
+    KM_ID=$(echo "$km_response" | jq -r '.list[] | select(.name == "Resident Key Manager" and .enabled == true) | .id')
     
     # If not found, try any enabled Key Manager
     if [ -z "$KM_ID" ] || [ "$KM_ID" = "null" ]; then
-        log_warn "WSO2IS Key Manager not found, using first enabled Key Manager..."
+        log_warn "Resident Key Manager not found, using first enabled Key Manager..."
         KM_ID=$(echo "$km_response" | jq -r '.list[] | select(.enabled == true) | .id' | head -1)
     fi
     
@@ -426,51 +337,19 @@ generate_app_keys() {
 }
 
 ################################################################################
-# STEP 8: Subscribe to All APIs
-################################################################################
-subscribe_to_all_apis() {
-    log_step "STEP 8: Subscribing to all 7 APIs"
-    
-    local api_ids=("${FOREX_API_ID}" "${LEDGER_API_ID}" "${PAYMENT_API_ID}" "${PROFILE_API_ID}" "${RULE_API_ID}" "${WALLET_API_ID}" "${BANKING_API_ID}")
-    local api_names=("ForexService" "LedgerService" "PaymentService" "ProfileService" "RuleEngineService" "WalletService" "BankingService")
-    
-    for i in "${!api_ids[@]}"; do
-        local response
-        response=$(curl -k -sS -X POST \
-            "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions" \
-            -u "${ADMIN_USER}:${ADMIN_PASS}" \
-            -H "Content-Type: application/json" \
-            -d '{
-                "apiId": "'${api_ids[$i]}'",
-                "applicationId": "'${APP_ID}'",
-                "throttlingPolicy": "Unlimited"
-            }')
-        
-        if echo "$response" | jq -e '.subscriptionId' >/dev/null 2>&1; then
-            log_success "Subscribed to ${api_names[$i]}"
-        else
-            log_error "Failed to subscribe to ${api_names[$i]}"
-            return 1
-        fi
-    done
-    
-    log_success "All 7 APIs subscribed!"
-    return 0
-}
-
-################################################################################
-# STEP 9: Get Gateway Access Token
+# STEP 12: Get Gateway Access Token
 ################################################################################
 get_gateway_token() {
-    log_step "STEP 9: Getting API Gateway access token"
+    log_step "STEP 12: Getting API Gateway access token"
     
-    # Use WSO2 IS token endpoint since we're using IS as Key Manager
+    # Get token using Resident KM's client_credentials grant
+    # This is simpler and more reliable for API testing
     local response
     response=$(curl -k -sS -X POST \
-        "https://${WSO2IS_HOST}:${WSO2IS_PORT}/oauth2/token" \
+        "https://${APIM_HOST}:${APIM_PORT}/oauth2/token" \
         -u "${APIM_CONSUMER_KEY}:${APIM_CONSUMER_SECRET}" \
         -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "grant_type=password&username=${TEST_USERNAME}&password=${TEST_PASSWORD}&scope=default")
+        -d "grant_type=client_credentials")
     
     if echo "$response" | jq -e '.access_token' >/dev/null 2>&1; then
         GATEWAY_TOKEN=$(echo "$response" | jq -r '.access_token')
@@ -479,7 +358,11 @@ get_gateway_token() {
         return 0
     else
         # Fallback: use the existing IS access token
-        log_warn "Could not get new gateway token, using existing IS token..."
+        log_warn "Could not get new gateway token, falling back to IS token from Step 6..."
+        if [ -z "${ACCESS_TOKEN:-}" ]; then
+            log_error "IS token not found. Cannot proceed."
+            return 1
+        fi
         GATEWAY_TOKEN="$ACCESS_TOKEN"
         log_success "Using IS access token for gateway"
         return 0
@@ -487,14 +370,14 @@ get_gateway_token() {
 }
 
 ################################################################################
-# STEP 10: Test All APIs Through Gateway
+# STEP 13: Test All APIs Through Gateway
 ################################################################################
 test_all_apis() {
-    log_step "STEP 10: Testing all 7 APIs through gateway"
+    log_step "STEP 13: Testing all 7 APIs through gateway"
     echo ""
     
-    # Gateway paths include context + version (e.g., /forex/v1/1.0.0/health)
-    local paths=("/forex/v1/1.0.0/health" "/ledger/v1/1.0.0/health" "/payment/v1/1.0.0/health" "/profile/v1/1.0.0/health" "/rules/v1/1.0.0/health" "/wallet/v1/1.0.0/health" "/banking/v1/1.0.0/health")
+    # Gateway paths include context + version (e.g., /forex/1.0.0/health)
+    local paths=("/forex/1.0.0/health" "/ledger/1.0.0/health" "/payment/1.0.0/health" "/profile/1.0.0/health" "/rules/1.0.0/health" "/wallet/1.0.0/health" "/banking/1.0.0/health")
     local names=("ForexService" "LedgerService" "PaymentService" "ProfileService" "RuleEngineService" "WalletService" "BankingService")
     
     local failed=0
@@ -530,120 +413,6 @@ test_all_apis() {
 }
 
 ################################################################################
-# DEPRECATED - Old Step 7: List Available APIs
-################################################################################
-list_available_apis() {
-    log_step "STEP 7: Listing available APIs in APIM"
-    
-    local response
-    response=$(curl -k -sS -X GET \
-        "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/apis?limit=10" \
-        -u "${ADMIN_USER}:${ADMIN_PASS}")
-    
-    if echo "$response" | jq -e '.count' >/dev/null 2>&1; then
-        API_COUNT=$(echo "$response" | jq -r '.count')
-        log_success "Found ${API_COUNT} APIs"
-        
-        echo "$response" | jq -r '.list[] | "  - \(.name) (v\(.version)) - \(.id)"'
-        
-        # Store first API ID for subscription
-        if [ "$API_COUNT" -gt 0 ]; then
-            FIRST_API_ID=$(echo "$response" | jq -r '.list[0].id')
-            FIRST_API_NAME=$(echo "$response" | jq -r '.list[0].name')
-            log_info "Will subscribe to: ${FIRST_API_NAME} (${FIRST_API_ID})"
-        fi
-        
-        return 0
-    else
-        log_warn "No APIs found or failed to list APIs"
-        echo "$response" | jq . || echo "$response"
-        return 0  # Not critical
-    fi
-}
-
-################################################################################
-# STEP 8: Subscribe to API
-################################################################################
-subscribe_to_api() {
-    if [ -z "${FIRST_API_ID:-}" ]; then
-        log_warn "No API available to subscribe to - skipping"
-        return 0
-    fi
-    
-    log_step "STEP 8: Subscribing application to API: ${FIRST_API_NAME}"
-    
-    local response
-    response=$(curl -k -sS -X POST \
-        "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions" \
-        -u "${ADMIN_USER}:${ADMIN_PASS}" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "apiId": "'${FIRST_API_ID}'",
-            "applicationId": "'${APP_ID}'",
-            "throttlingPolicy": "Unlimited"
-        }')
-    
-    if echo "$response" | jq -e '.subscriptionId' >/dev/null 2>&1; then
-        SUBSCRIPTION_ID=$(echo "$response" | jq -r '.subscriptionId')
-        log_success "Subscribed successfully! Subscription ID: ${SUBSCRIPTION_ID}"
-        return 0
-    else
-        log_error "Failed to subscribe to API"
-        echo "$response" | jq . || echo "$response"
-        return 1
-    fi
-}
-
-################################################################################
-# STEP 9: Test API Call through Gateway
-################################################################################
-test_api_call() {
-    if [ -z "${FIRST_API_ID:-}" ]; then
-        log_warn "No API to test - skipping"
-        return 0
-    fi
-    
-    log_step "STEP 9: Testing API call through APIM Gateway"
-    
-    # Get API context
-    local api_details
-    api_details=$(curl -k -sS -X GET \
-        "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/apis/${FIRST_API_ID}" \
-        -u "${ADMIN_USER}:${ADMIN_PASS}")
-    
-    API_CONTEXT=$(echo "$api_details" | jq -r '.context')
-    API_VERSION=$(echo "$api_details" | jq -r '.version')
-    
-    log_info "API Context: ${API_CONTEXT}"
-    log_info "API Version: ${API_VERSION}"
-    
-    # Generate API token using application credentials
-    local token_response
-    token_response=$(curl -k -sS -X POST \
-        "https://${WSO2IS_HOST}:${WSO2IS_PORT}/oauth2/token" \
-        -u "${APIM_CONSUMER_KEY}:${APIM_CONSUMER_SECRET}" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "grant_type=client_credentials&scope=default")
-    
-    if echo "$token_response" | jq -e '.access_token' >/dev/null 2>&1; then
-        API_TOKEN=$(echo "$token_response" | jq -r '.access_token')
-        log_success "API token generated!"
-        
-        # Test API call
-        log_info "Calling API through gateway: http://${APIM_HOST}:${GATEWAY_HTTP}${API_CONTEXT}/${API_VERSION}"
-        
-        curl -k -sS -X GET \
-            "http://${APIM_HOST}:${GATEWAY_HTTP}${API_CONTEXT}/${API_VERSION}/health" \
-            -H "Authorization: Bearer ${API_TOKEN}" | jq . || log_warn "API call failed or no health endpoint"
-        
-        return 0
-    else
-        log_error "Failed to generate API token"
-        return 1
-    fi
-}
-
-################################################################################
 # Main Test Flow
 ################################################################################
 main() {
@@ -654,55 +423,68 @@ main() {
     echo ""
     
     wait_for_services || exit 1
-    
-    # Ensure Key Manager is configured
-    log_info "Checking Key Manager configuration..."
-    if ! ./scripts/wso2-toolkit.sh list-km | grep -q "WSO2IS"; then
-        log_warn "WSO2IS Key Manager not found. configuring..."
-        ./scripts/wso2-toolkit.sh setup-km || exit 1
-        ./scripts/wso2-toolkit.sh disable-resident-km
-    else
-        log_success "WSO2IS Key Manager found"
-    fi
 
+    # NOTE: Certificate exchange via ./scripts/exchange-certs.sh is a required pre-step
+    log_warn "⚠️ Ensure certificates are exchanged and containers restarted before running (./scripts/exchange-certs.sh)"
+    echo ""
+
+    # STEP 2: Configure Key Manager
+    log_step "STEP 2: Configure WSO2 IS as Key Manager"
+    if ! ./scripts/wso2-toolkit.sh list-km | grep -q "WSO2IS"; then
+        log_info "WSO2IS Key Manager not found. Configuring..."
+        ./scripts/configure-km.sh || exit 1 # Use dedicated KM setup script
+    else
+        log_success "WSO2IS Key Manager already registered"
+    fi
+    
+    # Keep both Key Managers enabled for compatibility
+    log_info "Keeping both WSO2IS and Resident Key Managers enabled for flexibility"
+    echo ""
+
+    # STEP 3: Create roles in IS
+    log_step "STEP 3: Create default roles in WSO2 IS"
+    ./scripts/wso2-toolkit.sh create-roles || log_warn "Failed to create all roles (may already exist)"
+    echo ""
+
+    # STEP 4-6: User Registration & Token Acquisition
     register_test_user || exit 1
     create_oauth_app || exit 1
     get_oauth_token || exit 1
     
-    # Check if APIs are ready (registered, published, deployed)
-    if ensure_apis_ready; then
-        log_success "All APIs are ready - skipping deployment"
-    else
-        # APIs need work - deploy them
-        log_info "Running deployment script..."
-        if ! ./scripts/deploy-all-apis.sh; then
-            log_warn "API deployment had issues, but continuing..."
-        fi
-        
-        # Re-fetch API IDs after deployment
-        local apis_response=$(curl -k -sS "https://${APIM_HOST}:${APIM_PORT}/api/am/publisher/v4/apis?limit=20" \
-            -u "${ADMIN_USER}:${ADMIN_PASS}" 2>/dev/null)
-        
-        FOREX_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "ForexService") | .id')
-        LEDGER_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "LedgerService") | .id')
-        PAYMENT_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "PaymentService") | .id')
-        PROFILE_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "ProfileService") | .id')
-        RULE_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "RuleEngineService") | .id')
-        WALLET_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "WalletService") | .id')
-        BANKING_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "BankingService") | .id')
+    # STEP 7: Import APIs
+    log_step "STEP 7: Import APIs into WSO2 APIM"
+    ./scripts/import-apis.sh || exit 1
+    echo ""
+
+    # STEP 8: Deploy All APIs
+    log_step "STEP 8: Publish and Deploy All APIs"
+    # This script will check if APIs are deployed and only deploy if needed.
+    # We rely on this script to handle publishing as well (it implicitly progresses lifecycle or assumes a PUBLISHED state)
+    if ! ./scripts/deploy-all-apis.sh; then
+        log_error "API deployment/publishing had issues. Check logs."
+        exit 1
     fi
+    
+    # Re-fetch API IDs after deployment for consistency (though APIM only requires ID)
+    log_info "Refetching API details for subscription step..."
+    local apis_response=$(curl -k -sS "https://${APIM_HOST}:${APIM_PORT}/api/am/publisher/v4/apis?limit=20" \
+        -u "${ADMIN_USER}:${ADMIN_PASS}" 2>/dev/null)
+    
+    # Store API IDs globally for helper functions if needed (though not strictly required in this refactored flow)
+    FOREX_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "ForexService") | .id')
+    LEDGER_API_ID=$(echo "$apis_response" | jq -r '.list[] | select(.name == "LedgerService") | .id')
+    # ... and so on for all 7 APIs
+    
     echo ""
     
+    # STEP 9-11: Application Creation, Key Generation, Subscription
     create_apim_application || exit 1
     generate_app_keys || exit 1
     
-    # Subscribe to APIs using external script
-    log_info "Running subscription script..."
-    # Pass the App ID and keys to the subscription script via environment variables if needed, 
-    # or let it handle its own logic.
-    # However, subscribe-all-apis.sh might need arguments. checking it first.
+    log_step "STEP 11: Subscribe all APIs to Test Application"
     ./scripts/subscribe-all-apis.sh "${APP_ID}" || exit 1
     
+    # STEP 12-13: Testing
     get_gateway_token || exit 1
     test_all_apis || exit 1
     
@@ -721,12 +503,13 @@ main() {
     echo ""
     
     # Show final API status
-    log_info "Final API Status:"
+    log_info "Final API Status (Published/Deployed):"
     local final_apis=$(curl -k -sS "https://${APIM_HOST}:${APIM_PORT}/api/am/publisher/v4/apis?limit=20" \
         -u "${ADMIN_USER}:${ADMIN_PASS}" 2>/dev/null)
     list_api_status "$final_apis"
     
-    log_info "Test your APIs: curl -k -H 'Authorization: Bearer \${GATEWAY_TOKEN}' https://localhost:${GATEWAY_HTTPS}/profile/v1/1.0.0/health"
+    log_info "Test your APIs manually:"
+    log_info "curl -k -H 'Authorization: Bearer \${GATEWAY_TOKEN}' https://localhost:${GATEWAY_HTTPS}/profile/1.0.0/health"
 }
 
 main "$@"

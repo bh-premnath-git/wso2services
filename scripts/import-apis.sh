@@ -46,7 +46,6 @@ create_api() {
   "context": "${context}",
   "version": "${version}",
   "provider": "${ADMIN_USER}",
-  "lifeCycleStatus": "CREATED",
   "type": "HTTP",
   "transport": ["http", "https"],
   "policies": ["Unlimited"],
@@ -118,13 +117,29 @@ EOF
     fi
 }
 
-# Create the 7 APIs
-create_api "ForexService" "/forex" "1.0.0" "${FOREX_URL}"
-create_api "LedgerService" "/ledger" "1.0.0" "${LEDGER_URL}"
-create_api "PaymentService" "/payment" "1.0.0" "${PAYMENT_URL}"
-create_api "ProfileService" "/profile" "1.0.0" "${PROFILE_URL}"
-create_api "RuleEngineService" "/rules" "1.0.0" "${RULE_ENGINE_URL}"
-create_api "WalletService" "/wallet" "1.0.0" "${WALLET_URL}"
-create_api "BankingService" "/banking" "1.0.0" "${BANKING_URL}"
+echo ""
+echo "╔════════════════════════════════════════════════════════════╗"
+echo "║          Importing APIs into WSO2 API Manager             ║"
+echo "╚════════════════════════════════════════════════════════════╝"
+echo ""
 
-log_success "All APIs processed."
+# Create the 7 APIs (disable errexit to count failures)
+set +e
+failed=0
+create_api "ForexService" "/forex" "1.0.0" "${FOREX_URL}" || failed=$((failed + 1))
+create_api "LedgerService" "/ledger" "1.0.0" "${LEDGER_URL}" || failed=$((failed + 1))
+create_api "PaymentService" "/payment" "1.0.0" "${PAYMENT_URL}" || failed=$((failed + 1))
+create_api "ProfileService" "/profile" "1.0.0" "${PROFILE_URL}" || failed=$((failed + 1))
+create_api "RuleEngineService" "/rules" "1.0.0" "${RULE_ENGINE_URL}" || failed=$((failed + 1))
+create_api "WalletService" "/wallet" "1.0.0" "${WALLET_URL}" || failed=$((failed + 1))
+create_api "BankingService" "/banking" "1.0.0" "${BANKING_URL}" || failed=$((failed + 1))
+set -e
+
+echo ""
+if [ $failed -eq 0 ]; then
+    log_success "All APIs imported successfully!"
+    exit 0
+else
+    log_error "${failed}/7 APIs failed to import"
+    exit 1
+fi

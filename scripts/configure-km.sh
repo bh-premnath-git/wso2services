@@ -55,48 +55,33 @@ KM_EXISTS=$(curl -k -s -u "${ADMIN_USER}:${ADMIN_PASS}" \
 
 if [ -n "$KM_EXISTS" ] && [ "$KM_EXISTS" != "null" ]; then
     echo -e "${GREEN} FOUND${NC}"
-    echo "Key Manager '${KM_NAME}' is already registered (ID: ${KM_EXISTS}). Updating..."
     
-    # Update existing Key Manager
-    IS_SERVICE_URL="https://${IS_HOST_INT}:${IS_PORT_INT}/services/"
-    IS_BASE_URL="https://${IS_HOST_INT}:${IS_PORT_INT}"
+    # Check if it's enabled
+    KM_ENABLED=$(curl -k -s -u "${ADMIN_USER}:${ADMIN_PASS}" \
+        "https://${APIM_HOST}:${APIM_PORT}/api/am/admin/v4/key-managers/${KM_EXISTS}" | \
+        jq -r '.enabled')
     
-    PAYLOAD=$(cat <<EOF
-{
-  "name": "${KM_NAME}",
-  "type": "OAuth2",
-  "displayName": "${KM_DISPLAY_NAME}",
-  "description": "${KM_DESC}",
-  "enabled": true,
-  "additionalProperties": {
-    "client_registration_endpoint": "${IS_BASE_URL}/api/identity/oauth2/dcr/v1.1/register",
-    "introspection_endpoint": "${IS_BASE_URL}/oauth2/introspect",
-    "token_endpoint": "${IS_BASE_URL}/oauth2/token",
-    "revoke_endpoint": "${IS_BASE_URL}/oauth2/revoke",
-    "userinfo_endpoint": "${IS_BASE_URL}/oauth2/userinfo",
-    "authorize_endpoint": "${IS_BASE_URL}/oauth2/authorize",
-    "jwks_endpoint": "${IS_BASE_URL}/oauth2/jwks",
-    "scope_management_endpoint": "${IS_BASE_URL}/api/identity/oauth2/v1.0/scopes",
-    "grant_types": "password,client_credentials,refresh_token,authorization_code,implicit",
-    "Username": "${ADMIN_USER}",
-    "Password": "${ADMIN_PASS}"
-  }
-}
-EOF
-)
-    RESPONSE=$(curl -k -s -X PUT \
-        "https://${APIM_HOST}:${APIM_PORT}/api/am/admin/v4/key-managers/${KM_EXISTS}" \
-        -u "${ADMIN_USER}:${ADMIN_PASS}" \
-        -H "Content-Type: application/json" \
-        -d "$PAYLOAD")
-        
-    if echo "$RESPONSE" | jq -e '.id' >/dev/null 2>&1; then
-        echo -e "${GREEN}UPDATED!${NC}"
+    if [ "$KM_ENABLED" = "true" ]; then
+        echo -e "${GREEN}Key Manager '${KM_NAME}' is already configured and enabled (ID: ${KM_EXISTS})${NC}"
+        echo "Skipping configuration - Key Manager is ready to use."
         exit 0
     else
-        echo -e "${RED}UPDATE FAILED!${NC}"
-        echo "Response: $RESPONSE"
-        exit 1
+        echo -e "${YELLOW}Key Manager exists but is disabled. Enabling...${NC}"
+        # Enable the Key Manager by updating only the enabled field
+        RESPONSE=$(curl -k -s -X PUT \
+            "https://${APIM_HOST}:${APIM_PORT}/api/am/admin/v4/key-managers/${KM_EXISTS}" \
+            -u "${ADMIN_USER}:${ADMIN_PASS}" \
+            -H "Content-Type: application/json" \
+            -d '{"enabled": true}')
+        
+        if echo "$RESPONSE" | jq -e '.id' >/dev/null 2>&1; then
+            echo -e "${GREEN}Key Manager enabled successfully!${NC}"
+            exit 0
+        else
+            echo -e "${RED}Failed to enable Key Manager!${NC}"
+            echo "Response: $RESPONSE"
+            exit 1
+        fi
     fi
 fi
 

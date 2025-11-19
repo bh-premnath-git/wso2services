@@ -45,11 +45,28 @@ echo ""
 # API names
 apis=("ForexService" "LedgerService" "PaymentService" "ProfileService" "RuleEngineService" "WalletService" "BankingService")
 
+failed=0
 for api_name in "${apis[@]}"; do
     echo "Subscribing to ${api_name}..."
     
     # Get API ID
-    API_ID=$(curl -k -sS -X GET "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/apis?query=name:${api_name}" -u "${ADMIN_USER}:${ADMIN_PASS}" | jq -r '.list[0].id')
+    API_RESPONSE=$(curl -k -sS -X GET "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/apis?query=name:${api_name}" -u "${ADMIN_USER}:${ADMIN_PASS}")
+    API_ID=$(echo "$API_RESPONSE" | jq -r '.list[0].id // empty')
+    
+    if [ -z "$API_ID" ] || [ "$API_ID" = "null" ]; then
+        echo "  ⚠ ${api_name} not found - skipped"
+        failed=$((failed + 1))
+        continue
+    fi
+    
+    # Check if already subscribed
+    EXISTING_SUB=$(curl -k -sS -X GET "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions?apiId=${API_ID}&applicationId=${APP_ID}" -u "${ADMIN_USER}:${ADMIN_PASS}")
+    SUB_COUNT=$(echo "$EXISTING_SUB" | jq -r '.count // 0')
+    
+    if [ "$SUB_COUNT" -gt 0 ]; then
+        echo "  ✓ Already subscribed to ${api_name}"
+        continue
+    fi
     
     # Subscribe
     RESULT=$(curl -k -sS -X POST "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions" \
@@ -65,12 +82,22 @@ for api_name in "${apis[@]}"; do
         echo "  ✓ Subscribed to ${api_name}"
     else
         echo "  ✗ Failed: ${api_name}"
-        echo "$RESULT" | jq .
+        echo "$RESULT" | jq . 2>/dev/null || echo "$RESULT"
+        failed=$((failed + 1))
     fi
 done
 
 echo ""
-echo "✅ All subscriptions completed!"
-echo ""
-echo "Verify subscriptions:"
-curl -k -sS -X GET "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions?applicationId=${APP_ID}" -u "${ADMIN_USER}:${ADMIN_PASS}" | jq '.list[] | {api: .apiInfo.name, status: .status}'
+if [ $failed -eq 0 ]; then
+    echo "✅ All subscriptions completed successfully!"
+    echo ""
+    echo "Verify subscriptions:"
+    curl -k -sS -X GET "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions?applicationId=${APP_ID}" -u "${ADMIN_USER}:${ADMIN_PASS}" | jq '.list[] | {api: .apiInfo.name, status: .status}'
+    exit 0
+else
+    echo "⚠️  Subscriptions completed with ${failed} failures"
+    echo ""
+    echo "Verify subscriptions:"
+    curl -k -sS -X GET "https://${APIM_HOST}:${APIM_PORT}/api/am/devportal/v3/subscriptions?applicationId=${APP_ID}" -u "${ADMIN_USER}:${ADMIN_PASS}" | jq '.list[] | {api: .apiInfo.name, status: .status}'
+    exit 1
+fi
