@@ -391,7 +391,10 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_SERVICE_NAME=profile-service
+      - WSO2_IS_BASE=https://is-as-km:9443
       - WSO2_IS_URL=https://is-as-km:9443
+      - ADMIN_USER=admin
+      - ADMIN_PASS=admin
       # ComplyCube KYC Integration
       - COMPLYCUBE_API_KEY=${COMPLYCUBE_API_KEY}
       - COMPLYCUBE_BASE_URL=${COMPLYCUBE_BASE_URL:-https://api.complycube.com}

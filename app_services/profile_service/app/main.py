@@ -243,7 +243,7 @@ async def resend_verification_email(username: str):
         # Get user info from SCIM to get email and name
         async with httpx.AsyncClient(verify=False) as client:
             response = await client.get(
-                f"https://wso2is:9443/scim2/Users",
+                f"{wso2_client.base_url}/scim2/Users",
                 params={"filter": f'userName eq "{username.replace(chr(34), chr(92)+chr(34))}"'},
                 headers={
                     "Authorization": wso2_client.auth_header,
@@ -320,8 +320,8 @@ async def get_verification_status(username: str):
         async with httpx.AsyncClient(verify=False) as client:
             # Query SCIM for user
             response = await client.get(
-                f"https://wso2is:9443/scim2/Users",
-                params={"filter": f"userName eq {username}"},
+                f"{wso2_client.base_url}/scim2/Users",
+                params={"filter": f'userName eq "{username}"'},
                 headers={
                     "Authorization": wso2_client.auth_header,
                     "Accept": "application/scim+json"
@@ -483,7 +483,7 @@ async def get_current_user_profile(authorization: str = Header(None)):
         async with httpx.AsyncClient(verify=False) as client:
             # 1) Try SCIM by ID (preferred - sub is the SCIM user ID)
             scim_by_id = await client.get(
-                f"https://wso2is:9443/scim2/Users/{sub}",
+                f"{wso2_client.base_url}/scim2/Users/{sub}",
                 headers={
                     "Authorization": wso2_client.auth_header,
                     "Accept": "application/scim+json"
@@ -506,7 +506,7 @@ async def get_current_user_profile(authorization: str = Header(None)):
                 # Quote the value in SCIM filter and escape embedded quotes
                 filter_value = candidate.replace('"', r'\"')
                 scim_search = await client.get(
-                    f"https://wso2is:9443/scim2/Users",
+                    f"{wso2_client.base_url}/scim2/Users",
                     params={"filter": f'userName eq "{filter_value}"'},
                     headers={
                         "Authorization": wso2_client.auth_header,
@@ -574,8 +574,8 @@ async def get_user_profile(username: str):
         async with httpx.AsyncClient(verify=False) as client:
             # Query SCIM for user
             response = await client.get(
-                f"https://wso2is:9443/scim2/Users",
-                params={"filter": f"userName eq {username}"},
+                f"{wso2_client.base_url}/scim2/Users",
+                params={"filter": f'userName eq "{username}"'},
                 headers={
                     "Authorization": wso2_client.auth_header,
                     "Accept": "application/scim+json"
@@ -690,7 +690,7 @@ async def oauth2_token_endpoint(request: Request):
                 try:
                     async with httpx.AsyncClient(verify=False) as scim_client:
                         scim_response = await scim_client.get(
-                            f"https://wso2is:9443/scim2/Users",
+                            f"{wso2_client.base_url}/scim2/Users",
                             params={"filter": f'emails eq "{username.replace("\"" , r"\\\"")}"'},
                             headers={
                                 "Authorization": wso2_client.auth_header,
@@ -725,7 +725,7 @@ async def oauth2_token_endpoint(request: Request):
             auth = (token_data.pop("client_id"), token_data.pop("client_secret"))
         
         # Forward request to WSO2 IS
-        wso2_token_url = f"{os.getenv('WSO2_IS_BASE', 'https://wso2is:9443')}/oauth2/token"
+        wso2_token_url = f"{wso2_client.base_url}/oauth2/token"
         
         async with httpx.AsyncClient(verify=False) as client:
             response = await client.post(
@@ -981,8 +981,8 @@ async def get_profile(username: str):
         async with httpx.AsyncClient(verify=False) as client:
             # Query SCIM for user
             response = await client.get(
-                f"https://wso2is:9443/scim2/Users",
-                params={"filter": f"userName eq {username}"},
+                f"{wso2_client.base_url}/scim2/Users",
+                params={"filter": f'userName eq "{username}"'},
                 headers={
                     "Authorization": wso2_client.auth_header,
                     "Accept": "application/scim+json"
@@ -1105,7 +1105,7 @@ async def initiate_kyc_verification(username: str, request: KYCInitiateRequest):
         # Fetch user data from WSO2 IS
         async with httpx.AsyncClient(verify=False) as client:
             response = await client.get(
-                f"https://wso2is:9443/scim2/Users",
+                f"{wso2_client.base_url}/scim2/Users",
                 params={"filter": f'userName eq "{username.replace(chr(34), chr(92)+chr(34))}"'},
                 headers={
                     "Authorization": wso2_client.auth_header,
