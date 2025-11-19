@@ -64,7 +64,7 @@ echo ""
 ################################################################################
 log_info "STEP 1: Exporting APIM public certificate..."
 
-docker exec global-transfer-backend-api-manager-1 bash -c \
+docker exec -u 0 global-transfer-backend-api-manager-1 bash -c \
     "cd /home/wso2carbon/wso2am-*/repository/resources/security && \
      keytool -export -alias '$APIM_ALIAS' -keystore wso2carbon.jks \
      -file /tmp/apim-public.cert -storepass '$APIM_KEYSTORE_PASS' -noprompt" 2>&1 | grep -v "Certificate stored" || true
@@ -88,7 +88,7 @@ log_info "STEP 2: Importing APIM certificate into IS truststore..."
 docker cp "$TEMP_DIR/apim-public.cert" global-transfer-backend-is-as-km-1:/tmp/apim-public.cert
 
 # Remove if it already exists, then import
-docker exec global-transfer-backend-is-as-km-1 bash -c \
+docker exec -u 0 global-transfer-backend-is-as-km-1 bash -c \
     "cd /home/wso2carbon/wso2is-*/repository/resources/security && \
      keytool -delete -alias 'apim-public' -keystore client-truststore.p12 \
      -storetype PKCS12 -storepass '$TRUSTSTORE_PASS' -noprompt 2>/dev/null || true && \
@@ -102,8 +102,9 @@ log_success "APIM certificate imported into IS truststore"
 ################################################################################
 log_info "STEP 3: Exporting IS public certificate..."
 
-docker exec global-transfer-backend-is-as-km-1 bash -c \
-    "cd /home/wso2carbon/wso2is-*/repository/resources/security && \
+docker exec -u 0 global-transfer-backend-is-as-km-1 bash -c \
+    "rm -f /tmp/is-public.cert && \
+     cd /home/wso2carbon/wso2is-*/repository/resources/security && \
      keytool -export -alias '$IS_ALIAS' -keystore wso2carbon.p12 -storetype PKCS12 \
      -file /tmp/is-public.cert -storepass '$IS_KEYSTORE_PASS' -noprompt" 2>&1 | grep -v "Certificate stored" || true
 
@@ -126,7 +127,7 @@ log_info "STEP 4: Importing IS certificate into APIM truststore..."
 docker cp "$TEMP_DIR/is-public.cert" global-transfer-backend-api-manager-1:/tmp/is-public.cert
 
 # Remove if it already exists, then import
-docker exec global-transfer-backend-api-manager-1 bash -c \
+docker exec -u 0 global-transfer-backend-api-manager-1 bash -c \
     "cd /home/wso2carbon/wso2am-*/repository/resources/security && \
      keytool -delete -alias 'is-public' -keystore client-truststore.jks \
      -storepass '$TRUSTSTORE_PASS' -noprompt 2>/dev/null || true && \

@@ -40,7 +40,7 @@ Reference: https://apim.docs.wso2.com/en/latest/administer/key-managers/configur
 
 Prerequisites:
   • Containers running (docker compose up -d)
-  • Certificates exchanged (run ./scripts/truststorekey.sh trust)
+  • Certificates exchanged (run ./scripts/exchange-certs.sh trust)
 
 Steps:
 1. Access Admin Portal → https://localhost:9443/admin → Key Managers → Add Key Manager.
@@ -86,7 +86,7 @@ Steps:
      Certificate Type: Server (or Tenant based on your setup)
      Identity Username: admin@carbon.super (tenant-qualified user)
      Requirements:
-       • APIM and IS must trust each other's certificates (run truststorekey.sh trust)
+       • APIM and IS must trust each other's certificates (run exchange-certs.sh trust)
        • IS must map the client cert to the identity username
        • All endpoints must support client certificate authentication
      Note: The setup-km script does NOT configure mTLS - you must do this manually.
@@ -355,8 +355,9 @@ cmd_setup_km() {
     log_info "Checking if '${km_name}' already exists..."
     if curl -k -sS -u "${APIM_ADMIN_USER}:${APIM_ADMIN_PASS}" "${km_api}?limit=1000" \
         | grep -q "\"name\":\"${km_name}\""; then
-        log_warn "Key Manager '${km_name}' already exists – nothing to do"
-        return 0
+        log_warn "Key Manager '${km_name}' already exists – Updating configuration..."
+        cmd_update_km "${km_name}"
+        return $?
     fi
 
     # Internal IS endpoints (docker network)
@@ -998,7 +999,7 @@ EXAMPLES:
 
 NOTES:
   • Ensure containers are running: docker compose up -d
-  • Exchange certificates first: ./scripts/truststorekey.sh trust
+  • Exchange certificates first: ./scripts/exchange-certs.sh trust
   • Role creation enabled in deployment.toml: [role_mgt] allow_system_prefix_for_role = true
 
 HELP

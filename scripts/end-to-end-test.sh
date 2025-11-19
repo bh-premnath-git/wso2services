@@ -654,6 +654,17 @@ main() {
     echo ""
     
     wait_for_services || exit 1
+    
+    # Ensure Key Manager is configured
+    log_info "Checking Key Manager configuration..."
+    if ! ./scripts/wso2-toolkit.sh list-km | grep -q "WSO2IS"; then
+        log_warn "WSO2IS Key Manager not found. configuring..."
+        ./scripts/wso2-toolkit.sh setup-km || exit 1
+        ./scripts/wso2-toolkit.sh disable-resident-km
+    else
+        log_success "WSO2IS Key Manager found"
+    fi
+
     register_test_user || exit 1
     create_oauth_app || exit 1
     get_oauth_token || exit 1
@@ -684,7 +695,14 @@ main() {
     
     create_apim_application || exit 1
     generate_app_keys || exit 1
-    subscribe_to_all_apis || exit 1
+    
+    # Subscribe to APIs using external script
+    log_info "Running subscription script..."
+    # Pass the App ID and keys to the subscription script via environment variables if needed, 
+    # or let it handle its own logic.
+    # However, subscribe-all-apis.sh might need arguments. checking it first.
+    ./scripts/subscribe-all-apis.sh "${APP_ID}" || exit 1
+    
     get_gateway_token || exit 1
     test_all_apis || exit 1
     

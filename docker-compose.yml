@@ -69,6 +69,8 @@ services:
     networks:
       global-transfer-network :
         aliases: [ am.local ]
+    environment:
+      - JAVA_OPTS=-Dorg.wso2.ignoreHostnameVerification=true -Dhttpclient.hostnameVerifier=AllowAll
   dynamodb-init:
     image: python:3.11-slim
     container_name: dynamodb-init

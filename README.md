@@ -1,76 +1,333 @@
 # Global Transfer Backend
 
-Containerized payment and FX platform that combines a WSO2 identity/API layer with Python microservices, data stores, and observability tooling. For deep WSO2 specifics see `wso2architecture.md`; this README provides the concise whole-project view.
+Containerized payment and FX platform combining WSO2 identity/API layer with Python microservices, data stores, and observability tooling. This README provides a complete reference for all files and directories.
 
 ## Quick Start
-1. Copy `.env` (see variables below) and fill secrets for SMTP, Stripe, BRMS, etc.
+1. Copy `.env` and fill secrets for SMTP, Stripe, BRMS, etc.
 2. Ensure Docker/Docker Compose are installed.
-3. Run `docker-compose up -d` to start **all** services (WSO2 stack, data tier, observability, microservices).
-4. Use `docker-compose logs -f <service>` for troubleshooting; health-check endpoints are defined per service.
+3. Run `docker-compose up -d` to start all 22 services.
+4. Run `./scripts/end-to-end-test.sh` to verify setup.
+5. View logs: `docker-compose logs -f <service>`
 
-## Repository Layout
-| Path | Description |
-| --- | --- |
-| `.env` | Centralized credentials/API keys (ignored via `.gitignore`). |
-| `.gitignore` | Ignores `.env` to protect secrets. |
-| `README.md` | This high-level project summary. |
-| `wso2architecture.md` | Detailed architecture doc for APIM + IS stack. |
-| `docker-compose.yml` | Orchestrates every container (WSO2, infra, microservices, observability). |
-| `conf/` | Mounted config for MySQL + WSO2 components. |
-| `dockerfiles/` | Custom Dockerfiles for APIM and IS-as-KM. |
-| `wso2/` | WSO2 dependency artifacts (e.g., MySQL connector). |
-| `app_scripts/` | Utility scripts (e.g., DynamoDB initialization). |
-| `app_services/` | Source for all Python services (forex, ledger, payment, profile, rule-engine, wallet, banking, Celery workers/beat). |
-| `otel/` | OpenTelemetry Collector configuration. |
-| `app_services/**/Dockerfile` | Service-specific build instructions referenced by compose. |
+## Architecture Overview
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     External Clients                        │
+└──────────────────────────┬──────────────────────────────────┘
+                           ▼
+                ┌──────────────────────┐
+                │  WSO2 API Manager    │ :9443, :8280/:8243
+                │   (Gateway/Portal)   │
+                └──────────┬───────────┘
+                           │
+            ┌──────────────┼──────────────┐
+            │              │              │
+            ▼              ▼              ▼
+  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐
+  │  WSO2 IS    │  │Microservices │  │  Data Tier   │
+  │ (Key Mgr)   │  │ (8 services) │  │ MySQL/Redis  │
+  │   :9444     │  │ :8001-:8007  │  │ DynamoDB/PG  │
+  └─────────────┘  └──────┬───────┘  └──────────────┘
+                          │
+                 ┌────────┴────────┐
+                 │                 │
+                 ▼                 ▼
+         ┌──────────────┐  ┌──────────────┐
+         │   BRMS       │  │Observability │
+         │  GoRules     │  │ Jaeger/OTEL  │
+         │   :8181      │  │   :16686     │
+         └──────────────┘  └──────────────┘
+```
 
-## Service Topology (docker-compose)
-* **Core WSO2 Layer**
-  * `mysql` – shared DB backend using `.env` credentials and `conf/mysql` init scripts.
-  * `is-as-km` – WSO2 Identity Server 7.1.0 acting as Key Manager (see `dockerfiles/is-as-km` + `conf/is-as-km`).
-  * `api-manager` – WSO2 APIM 4.6.0 gateway/publisher/devportal (see `dockerfiles/apim` + `conf/apim`).
-* **Data & Messaging**
-  * `redis` (auth-protected), `redpanda` (Kafka-compatible), `dynamodb-local` + `dynamodb-init`, `pg-database` + `brms` (GoRules BRMS), `jaeger`, `otel-collector`.
-* **Application Services (`app_services`)**
-  * Stateless APIs: `forex-service`, `ledger-service`, `payment-service`, `profile-service`, `rule-engine-service`, `wallet-service`, `banking-service`.
-  * Background workers: `fx-worker`, `fx-beat` (Celery) plus shared BRMS/WSO2 integrations.
-* **Observability & Networking**
-  * All services join `payment-network` bridge with custom aliases (e.g., `am.local`, `km.local`).
-  * OTEL exporter endpoints pre-configured in environment blocks.
+**Total Services**: 22 containers (WSO2: 2, Infrastructure: 5, Microservices: 8, Workers: 2, BRMS: 1, Observability: 2, Init: 2)
 
-Refer to `wso2architecture.md` for diagrams and exhaustive description of the APIM/IS segment, databases, and security.
+---
+
+## Repository Structure
+
+### Root Files
+- **`.env`** (885 bytes) - Centralized secrets and configuration ⚠️ **Never commit**
+- **`.gitignore`** - Protects `.env` from version control
+- **`README.md`** - This comprehensive project documentation
+- **`wso2architecture.md`** (28KB) - Detailed WSO2 APIM + IS architecture, security, OAuth2 flows
+- **`docker-compose.yml`** (19KB) - Orchestrates all 22 services with health checks, networks, volumes
+
+### Scripts Directory (`scripts/`)
+- **`end-to-end-test.sh`** (29KB) - Complete E2E test (user registration → OAuth → API subscription → gateway testing)
+  - 10 test steps with colored logging
+  - API status table display
+  - Retry logic and error handling
+  - Usage: `./scripts/end-to-end-test.sh`
+
+- **`deploy-all-apis.sh`** (5.1KB) - Deploys all 7 APIs to gateway with revisions (idempotent)
+  - Usage: `./scripts/deploy-all-apis.sh`
+
+- **`subscribe-all-apis.sh`** (2.3KB) - Bulk API subscription for test application
+  - Usage: `./scripts/subscribe-all-apis.sh`
+
+- **`exchange-certs.sh`** (6.9KB) - Certificate exchange between WSO2 IS and APIM for mutual TLS
+  - Usage: `./scripts/exchange-certs.sh`
+
+- **`wso2-toolkit.sh`** (37KB) - Swiss-army knife CLI for WSO2 management
+  ```bash
+  ./scripts/wso2-toolkit.sh list-users
+  ./scripts/wso2-toolkit.sh create-user <username> <password> <email>
+  ./scripts/wso2-toolkit.sh list-apis
+  ./scripts/wso2-toolkit.sh create-app <app-name>
+  ./scripts/wso2-toolkit.sh health
+  ```
+
+### App Scripts (`app_scripts/`)
+- **`init_dynamodb.sh`** (3.9KB) - Seeds DynamoDB tables: `forex_rates`, `transactions`, `user_wallets`, `audit_logs`
+
+---
+
+## Application Services (`app_services/`)
+
+All services are Python FastAPI-based, following pattern: `Dockerfile` + `requirements.txt` + `app/main.py`
+
+### 1. Banking Service (Port 8007)
+**Purpose**: Bank account management, Mastercard integration
+
+**Files**:
+- `app/main.py` - FastAPI application
+- `app/config.py` - Environment configuration
+- `app/schemas.py` - Pydantic models
+- `app/api/v1/bank_accounts.py` - Account CRUD
+- `app/services/mastercard_client.py` - Mastercard API client
+
+**Endpoints**: `/health`, `/banking/v1/accounts`, `/banking/v1/accounts/{id}/balance`
+
+### 2. Common Module
+**Purpose**: Shared auth, middleware, utilities for all services
+
+**Files**:
+- `auth/wso2_client.py` - WSO2 IS client (token introspection)
+- `auth/models.py` - User, Token models
+- `middleware.py` - Logging, CORS, authentication
+- `utils.py` - JWT validation helpers
+- `exceptions.py` - Custom exceptions
+- `config.py` - Common configuration
+
+### 3. Forex Service (Port 8001)
+**Purpose**: FX rates with Celery background tasks
+
+**Files**:
+- `app/main.py` - FastAPI endpoints
+- `app/celery_app.py` - Celery configuration
+- `app/tasks.py` - OANDA API rate fetching (periodic)
+
+**Endpoints**: `/health`, `/rates/{from}/{to}`, `/rates/{pair}`
+**Storage**: DynamoDB
+
+### 4. Ledger Service (Port 8002)
+**Purpose**: Transaction ledger, double-entry bookkeeping
+
+**Files**: `app/main.py`
+
+**Endpoints**: `/health`, `/ledger/v1/entries`, `/ledger/v1/balance/{account_id}`
+**Storage**: DynamoDB (`transactions`)
+
+### 5. Payment Service (Port 8003)
+**Purpose**: Payment processing with pluggable adapters
+
+**Files**:
+- `app/main.py` - Payment endpoints
+- `adapters/base.py` - Abstract adapter
+- `adapters/manager.py` - Adapter factory
+- `adapters/stripe/__init__.py` - Stripe integration
+- `adapters/custom/__init__.py` - Custom payment logic
+
+**Endpoints**: `/health`, `/payment/v1/charge`, `/payment/v1/refund`, `/payment/v1/status/{id}`
+
+### 6. Profile Service (Port 8004)
+**Purpose**: User profiles, email verification, KYC tracking
+
+**Files**:
+- `app/main.py` - Profile/auth endpoints
+- `app/email_service.py` - SMTP email sending
+- `app/models/kyc.py` - KYC status enum
+- `app/config.py` - SMTP configuration
+
+**Endpoints**: 
+- Registration: `/register`, `/verify-email`, `/resend-verification-email`
+- Auth: `/auth/login`, `/auth/userinfo`, `/auth/refresh`, `/auth/reset-password`
+- Profile: `/auth/profile/{username}` (GET/PATCH)
+
+**Storage**: DynamoDB (`user_profiles`)
+
+### 7. Rule Engine Service (Port 8005)
+**Purpose**: Business rules evaluation via GoRules BRMS
+
+**Files**:
+- `app/main.py` - Rule endpoints
+- `rules/risk_assessment.json` - Risk scoring rules
+- `rules/transaction_rules.json` - Transaction business logic
+- `rules/trans.json` - Validation rules
+- `test_rules.py` - Unit tests
+
+**Endpoints**: `/health`, `/rules/v1/evaluate`, `/rules/v1/transaction`, `/rules/v1/risk`
+
+### 8. Wallet Service (Port 8006)
+**Purpose**: Digital wallet management
+
+**Files**: `app/main.py`
+
+**Endpoints**: `/health`, `/wallet/v1/create`, `/wallet/v1/balance/{user_id}`, `/wallet/v1/deposit`, `/wallet/v1/withdraw`, `/wallet/v1/transfer`
+**Storage**: DynamoDB (`user_wallets`)
+
+---
+
+## Configuration (`conf/`)
+
+### APIM Configuration (`conf/apim/`)
+```
+repository/
+├── conf/
+│   └── deployment.toml          # Main APIM config (DB, gateway, Key Manager)
+└── resources/security/
+    ├── wso2carbon.jks           # APIM keystore
+    └── client-truststore.jks    # APIM truststore
+```
+
+### IS Configuration (`conf/is-as-km/`)
+```
+repository/
+├── conf/
+│   └── deployment.toml          # Main IS config (DB, SCIM2, OAuth2)
+└── resources/security/
+    ├── wso2carbon.p12           # IS keystore
+    └── client-truststore.p12    # IS truststore
+```
+
+### MySQL Configuration (`conf/mysql/`)
+```
+conf/
+└── my.cnf                       # MySQL server settings
+scripts/
+├── 01_create_databases.sql      # Creates WSO2_SHARED_DB, WSO2AM_DB, WSO2_IS_DB
+├── 02_wso2_is_shared_db.sql     # IS shared schema
+├── 03_wso2_is_db.sql            # IS schema
+├── 04_wso2am_shared_db.sql      # APIM shared schema
+├── 05_wso2am_db.sql             # APIM schema
+├── 06_fix_claim_mappings_apim.sql
+├── 07_fix_claim_mappings_is.sql
+└── z_health_check.sh            # DB health verification
+```
+
+---
+
+## Dockerfiles (`dockerfiles/`)
+
+### APIM Dockerfile (`dockerfiles/apim/`)
+- Base: `wso2/wso2am:4.6.0`
+- Adds: MySQL connector JAR
+- Mounts: Custom `deployment.toml`, keystores
+
+### IS Dockerfile (`dockerfiles/is-as-km/`)
+- Base: `wso2/wso2is:7.1.0`
+- Adds: 
+  - `dropins/wso2is.key.manager.core-2.0.6.jar` - Key Manager core
+  - `dropins/wso2is.notification.event.handlers-2.0.6.jar` - Event handlers
+  - `webapps/keymanager-operations.war` - Key Manager web app
+  - MySQL connector JAR
+- Mounts: Custom `deployment.toml`, keystores
+
+---
+
+## WSO2 Dependencies (`wso2/`)
+- **`repository/components/lib/mysql-connector-j-8.0.33.jar`** - MySQL JDBC driver for IS and APIM
+
+---
+
+## OpenTelemetry (`otel/`)
+- **`Dockerfile`** - Custom OTEL Collector image
+- **`collector.yaml`** - Collector configuration
+  - Receivers: OTLP (gRPC :4317, HTTP :4318)
+  - Exporters: Jaeger (:14250), Prometheus (:8889), Logging
+
+---
 
 ## Environment Variables (`.env`)
-The following keys must be defined before running Compose (values shown here are placeholders/defaults):
 
+| Category | Variables | Purpose |
+|----------|-----------|---------|
+| **Database** | `MYSQL_ROOT_PASSWORD` | MySQL root access |
+| **Email** | `SMTP_HOST`, `SMTP_PORT`, `SENDER_EMAIL`, `SENDER_PASSWORD` | Email notifications |
+| **Forex** | `OANDA_API_BASE`, `OANDA_API_KEY` | Exchange rate data |
+| **Payments** | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe integration |
+| **BRMS** | `BRMS_DB_USER`, `BRMS_DB_PASSWORD`, `BRMS_LICENSE_KEY`, `BRMS_TOKEN`, `BRMS_ENABLED`, `BRMS_URL`, `BRMS_PROJECT_ID` | Business rules engine |
+| **Redis** | `REDIS_PASSWORD` | Cache/broker auth |
+| **KYC** | `COMPLYCUBE_API_KEY` | Identity verification |
+| **Banking** | `MASTERCARD_API_KEY` | Banking integration |
+
+---
+
+## Service Ports
+
+| Service | Internal | External | Protocol |
+|---------|----------|----------|----------|
+| WSO2 IS | 9443 | 9444 | HTTPS |
+| WSO2 APIM | 9443 | 9443 | HTTPS |
+| APIM Gateway | 8280/8243 | 8280/8243 | HTTP/HTTPS |
+| MySQL | 3306 | 3306 | TCP |
+| Redis | 6379 | 6379 | TCP |
+| Redpanda | 9092/19092 | 9092/19092 | Kafka |
+| DynamoDB | 8000 | 8000 | HTTP |
+| PostgreSQL | 5432 | 5432 | TCP |
+| BRMS | 8080 | 8181 | HTTP |
+| Jaeger UI | 16686 | 16686 | HTTP |
+| OTEL Collector | 4317/4318 | 4317/4318 | gRPC/HTTP |
+| Forex Service | 8001 | 8001 | HTTP |
+| Ledger Service | 8002 | 8002 | HTTP |
+| Payment Service | 8003 | 8003 | HTTP |
+| Profile Service | 8004 | 8004 | HTTP |
+| Rule Engine | 8005 | 8005 | HTTP |
+| Wallet Service | 8006 | 8006 | HTTP |
+| Banking Service | 8007 | 8007 | HTTP |
+
+---
+
+## Common Commands
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Check service health
+./scripts/wso2-toolkit.sh health
+
+# Run E2E test (full workflow)
+./scripts/end-to-end-test.sh
+
+# Deploy APIs to gateway
+./scripts/deploy-all-apis.sh
+
+# Subscribe to all APIs
+./scripts/subscribe-all-apis.sh
+
+# View service logs
+docker-compose logs -f <service-name>
+
+# Restart a service
+docker-compose restart <service-name>
+
+# Stop all services
+docker-compose down
+
+# Remove all data (DESTRUCTIVE)
+docker-compose down -v
 ```
-MYSQL_ROOT_PASSWORD
-SMTP_HOST
-SMTP_PORT
-SENDER_EMAIL
-SENDER_PASSWORD
-OANDA_API_BASE
-OANDA_API_KEY
-STRIPE_SECRET_KEY
-STRIPE_PUBLISHABLE_KEY
-STRIPE_WEBHOOK_SECRET
-BRMS_DB_USER
-BRMS_DB_PASSWORD
-BRMS_DB_NAME
-BRMS_LICENSE_KEY
-BRMS_TOKEN
-SMTP_HOST / PORT / credentials
-AWS + Redis overrides (optional)
-COMPLYCUBE_*, MASTERCARD_* (profile/banking services)
-BRMS_ENABLED, BRMS_URL, BRMS_PROJECT_ID (rule engine integration)
-```
 
-> **Tip:** keep `.env` out of version control (already covered in `.gitignore`).
+---
 
-## Additional Documentation & Scripts
-* `wso2architecture.md` – authoritative source for WSO2 deployment details.
-* `app_scripts/init_dynamodb.sh` – seeds DynamoDB tables for local testing.
-* `otel/collector.yaml` – modifies telemetry pipeline (Jaeger exporter, metrics endpoints).
-* `conf/mysql/scripts/*.sql` – schema and data fixes for IS/APIM databases (run automatically).
+## Documentation References
 
-Keep the README synchronized with new services/configs whenever `docker-compose.yml`, `.env`, or `wso2architecture.md` change.
+- **`wso2architecture.md`** - Comprehensive WSO2 architecture, security, troubleshooting
+- **`scripts/end-to-end-test.sh`** - Comments explain each test step
+- **Service READMEs** - `app_services/rule_engine_service/README.md`
+
+---
+
+**Maintained by**: Development Team  
+**Last Updated**: November 2025
