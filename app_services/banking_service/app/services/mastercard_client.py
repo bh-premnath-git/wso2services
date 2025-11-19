@@ -5,10 +5,21 @@ Handles authentication and API calls to Mastercard/Finicity
 import httpx
 import base64
 import logging
+import os
+import sys
+from pathlib import Path
 import xml.etree.ElementTree as ET
 from typing import Optional, Dict, List
 from datetime import datetime, timedelta
-from app.config import settings
+
+# Add common module to path to import config
+common_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'common'))
+if os.path.exists(common_path):
+    sys.path.insert(0, common_path)
+else:
+    sys.path.insert(0, '/app/common')
+
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +28,11 @@ class MastercardClient:
     """Client for Mastercard Open Finance API"""
     
     def __init__(self):
-        self.partner_id = settings.MASTERCARD_PARTNER_ID
-        self.partner_secret = settings.MASTERCARD_PARTNER_SECRET
-        self.app_key = settings.MASTERCARD_APP_KEY
-        self.base_url = settings.MASTERCARD_BASE_URL
-        self.connect_url = settings.MASTERCARD_CONNECT_URL
+        self.partner_id = config.MASTERCARD_PARTNER_ID
+        self.partner_secret = config.MASTERCARD_PARTNER_SECRET
+        self.app_key = config.MASTERCARD_APP_KEY
+        self.base_url = config.MASTERCARD_BASE_URL
+        self.connect_url = config.MASTERCARD_CONNECT_URL
         
         self.access_token: Optional[str] = None
         self.token_expires_at: Optional[datetime] = None

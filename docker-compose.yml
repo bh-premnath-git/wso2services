@@ -529,8 +529,8 @@ services:
       - MASTERCARD_PARTNER_ID=${MASTERCARD_PARTNER_ID:-your_partner_id}
       - MASTERCARD_PARTNER_SECRET=${MASTERCARD_PARTNER_SECRET:-your_partner_secret}
       - MASTERCARD_APP_KEY=${MASTERCARD_APP_KEY:-your_app_key}
-      - MASTERCARD_API_BASE_URL=${MASTERCARD_API_BASE_URL:-https://api.finicity.com}
-      - MASTERCARD_CONNECT_BASE_URL=${MASTERCARD_CONNECT_BASE_URL:-https://connect2.finicity.com}
+      - MASTERCARD_BASE_URL=${MASTERCARD_BASE_URL:-https://api.finicity.com}
+      - MASTERCARD_CONNECT_URL=${MASTERCARD_CONNECT_URL:-https://connect2.finicity.com}
       # Application Settings
       - CALLBACK_BASE_URL=${CALLBACK_BASE_URL:-http://localhost:8007}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-your-32-character-encryption-key}

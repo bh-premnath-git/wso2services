@@ -64,6 +64,26 @@ class Config:
     STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
     STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
+    # ============================================================================
+    # Mastercard Open Finance API Configuration
+    # ============================================================================
+    MASTERCARD_PARTNER_ID: str = os.getenv("MASTERCARD_PARTNER_ID", "")
+    MASTERCARD_PARTNER_SECRET: str = os.getenv("MASTERCARD_PARTNER_SECRET", "")
+    MASTERCARD_APP_KEY: str = os.getenv("MASTERCARD_APP_KEY", "")
+    MASTERCARD_BASE_URL: str = os.getenv("MASTERCARD_BASE_URL", "https://api.finicity.com")
+    MASTERCARD_CONNECT_URL: str = os.getenv("MASTERCARD_CONNECT_URL", "https://connect2.finicity.com")
+    
+    # Banking Service DynamoDB Tables
+    MASTERCARD_CUSTOMERS_TABLE: str = os.getenv("MASTERCARD_CUSTOMERS_TABLE", "mastercard_customers")
+    LINKED_BANK_ACCOUNTS_TABLE: str = os.getenv("LINKED_BANK_ACCOUNTS_TABLE", "linked_bank_accounts")
+    ACCOUNT_CONNECTION_LOGS_TABLE: str = os.getenv("ACCOUNT_CONNECTION_LOGS_TABLE", "account_connection_logs")
+    
+    # Banking Service Configuration
+    BANKING_SERVICE_VERSION: str = "1.0.0"
+    BANKING_SERVICE_PORT: int = int(os.getenv("BANKING_SERVICE_PORT", "8007"))
+    BANKING_REDIS_URL: str = os.getenv("BANKING_REDIS_URL", f"redis://:{os.getenv('REDIS_PASSWORD', 'redis-secret')}@redis:6379/7")
+    BANKING_API_V1_PREFIX: str = "/api/v1"
+
     # Redis and DynamoDB for forex service and background jobs
     AWS_REGION: str = os.getenv("AWS_REGION", "ap-south-1")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "dummy_access_key")

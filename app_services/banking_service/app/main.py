@@ -24,8 +24,8 @@ else:
 
 from utils import get_ddb_table, get_redis, prepare_endpoint
 from middleware import add_cors_middleware
+from config import config
 
-from app.config import settings
 from app.api.v1 import bank_accounts
 from app.schemas import HealthResponse
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # Create FastAPI application
 app = FastAPI(
     title="Banking Service",
-    version=settings.SERVICE_VERSION,
+    version=config.BANKING_SERVICE_VERSION,
     description="Bank account linking and management via Mastercard Open Finance",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -48,11 +48,11 @@ app = FastAPI(
 add_cors_middleware(app)
 
 # Redis cache (shared factory)
-_redis = get_redis(settings.REDIS_URL)
-_CACHE_TTL = settings.CACHE_TTL_SECONDS
+_redis = get_redis(config.BANKING_REDIS_URL)
+_CACHE_TTL = config.CACHE_TTL_SECONDS
 
 # DynamoDB tables - singleton pattern
-_DDB_ENDPOINT = prepare_endpoint(settings.DYNAMODB_ENDPOINT)
+_DDB_ENDPOINT = prepare_endpoint(config.DDB_ENDPOINT)
 _CUSTOMERS_TABLE: Optional[any] = None
 _ACCOUNTS_TABLE: Optional[any] = None
 _LOGS_TABLE: Optional[any] = None
@@ -63,9 +63,9 @@ def _get_customers_table():
     global _CUSTOMERS_TABLE
     if _CUSTOMERS_TABLE is None:
         _CUSTOMERS_TABLE = get_ddb_table(
-            region="ap-south-1",
+            region=config.AWS_REGION,
             endpoint=_DDB_ENDPOINT,
-            table_name="mastercard_customers"
+            table_name=config.MASTERCARD_CUSTOMERS_TABLE
         )
     return _CUSTOMERS_TABLE
 
@@ -75,9 +75,9 @@ def _get_accounts_table():
     global _ACCOUNTS_TABLE
     if _ACCOUNTS_TABLE is None:
         _ACCOUNTS_TABLE = get_ddb_table(
-            region="ap-south-1",
+            region=config.AWS_REGION,
             endpoint=_DDB_ENDPOINT,
-            table_name="linked_bank_accounts"
+            table_name=config.LINKED_BANK_ACCOUNTS_TABLE
         )
     return _ACCOUNTS_TABLE
 
@@ -87,9 +87,9 @@ def _get_logs_table():
     global _LOGS_TABLE
     if _LOGS_TABLE is None:
         _LOGS_TABLE = get_ddb_table(
-            region="ap-south-1",
+            region=config.AWS_REGION,
             endpoint=_DDB_ENDPOINT,
-            table_name="account_connection_logs"
+            table_name=config.ACCOUNT_CONNECTION_LOGS_TABLE
         )
     return _LOGS_TABLE
 
@@ -111,59 +111,56 @@ def _validate_ddb_tables() -> None:
             retries={"max_attempts": 0, "mode": "standard"},
         )
         
-        access_key = os.getenv("AWS_ACCESS_KEY_ID", "dummy_access_key")
-        secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "dummy_secret_key")
-        
         client = boto3.client(
             "dynamodb",
-            region_name="ap-south-1",
+            region_name=config.AWS_REGION,
             endpoint_url=_DDB_ENDPOINT,
             config=boto_config,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
+            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
         )
 
         # Validate customers table
-        logger.info(f"Validating DynamoDB table 'mastercard_customers' at {_DDB_ENDPOINT}")
-        response = client.describe_table(TableName="mastercard_customers")
+        logger.info(f"Validating DynamoDB table '{config.MASTERCARD_CUSTOMERS_TABLE}' at {_DDB_ENDPOINT}")
+        response = client.describe_table(TableName=config.MASTERCARD_CUSTOMERS_TABLE)
         table_status = response["Table"]["TableStatus"]
-        logger.info(f"DynamoDB table 'mastercard_customers' found with status: {table_status}")
+        logger.info(f"DynamoDB table '{config.MASTERCARD_CUSTOMERS_TABLE}' found with status: {table_status}")
 
         if table_status == "CREATING":
-            logger.info("Waiting for table 'mastercard_customers' to become ACTIVE...")
+            logger.info(f"Waiting for table '{config.MASTERCARD_CUSTOMERS_TABLE}' to become ACTIVE...")
             waiter = client.get_waiter("table_exists")
-            waiter.wait(TableName="mastercard_customers")
-            logger.info("Table 'mastercard_customers' is now ACTIVE")
+            waiter.wait(TableName=config.MASTERCARD_CUSTOMERS_TABLE)
+            logger.info(f"Table '{config.MASTERCARD_CUSTOMERS_TABLE}' is now ACTIVE")
         elif table_status == "ACTIVE":
-            logger.info("Table 'mastercard_customers' is ACTIVE and ready")
+            logger.info(f"Table '{config.MASTERCARD_CUSTOMERS_TABLE}' is ACTIVE and ready")
 
         # Validate accounts table
-        logger.info(f"Validating DynamoDB table 'linked_bank_accounts' at {_DDB_ENDPOINT}")
-        response = client.describe_table(TableName="linked_bank_accounts")
+        logger.info(f"Validating DynamoDB table '{config.LINKED_BANK_ACCOUNTS_TABLE}' at {_DDB_ENDPOINT}")
+        response = client.describe_table(TableName=config.LINKED_BANK_ACCOUNTS_TABLE)
         table_status = response["Table"]["TableStatus"]
-        logger.info(f"DynamoDB table 'linked_bank_accounts' found with status: {table_status}")
+        logger.info(f"DynamoDB table '{config.LINKED_BANK_ACCOUNTS_TABLE}' found with status: {table_status}")
 
         if table_status == "CREATING":
-            logger.info("Waiting for table 'linked_bank_accounts' to become ACTIVE...")
+            logger.info(f"Waiting for table '{config.LINKED_BANK_ACCOUNTS_TABLE}' to become ACTIVE...")
             waiter = client.get_waiter("table_exists")
-            waiter.wait(TableName="linked_bank_accounts")
-            logger.info("Table 'linked_bank_accounts' is now ACTIVE")
+            waiter.wait(TableName=config.LINKED_BANK_ACCOUNTS_TABLE)
+            logger.info(f"Table '{config.LINKED_BANK_ACCOUNTS_TABLE}' is now ACTIVE")
         elif table_status == "ACTIVE":
-            logger.info("Table 'linked_bank_accounts' is ACTIVE and ready")
+            logger.info(f"Table '{config.LINKED_BANK_ACCOUNTS_TABLE}' is ACTIVE and ready")
 
         # Validate logs table
-        logger.info(f"Validating DynamoDB table 'account_connection_logs' at {_DDB_ENDPOINT}")
-        response = client.describe_table(TableName="account_connection_logs")
+        logger.info(f"Validating DynamoDB table '{config.ACCOUNT_CONNECTION_LOGS_TABLE}' at {_DDB_ENDPOINT}")
+        response = client.describe_table(TableName=config.ACCOUNT_CONNECTION_LOGS_TABLE)
         table_status = response["Table"]["TableStatus"]
-        logger.info(f"DynamoDB table 'account_connection_logs' found with status: {table_status}")
+        logger.info(f"DynamoDB table '{config.ACCOUNT_CONNECTION_LOGS_TABLE}' found with status: {table_status}")
 
         if table_status == "CREATING":
-            logger.info("Waiting for table 'account_connection_logs' to become ACTIVE...")
+            logger.info(f"Waiting for table '{config.ACCOUNT_CONNECTION_LOGS_TABLE}' to become ACTIVE...")
             waiter = client.get_waiter("table_exists")
-            waiter.wait(TableName="account_connection_logs")
-            logger.info("Table 'account_connection_logs' is now ACTIVE")
+            waiter.wait(TableName=config.ACCOUNT_CONNECTION_LOGS_TABLE)
+            logger.info(f"Table '{config.ACCOUNT_CONNECTION_LOGS_TABLE}' is now ACTIVE")
         elif table_status == "ACTIVE":
-            logger.info("Table 'account_connection_logs' is ACTIVE and ready")
+            logger.info(f"Table '{config.ACCOUNT_CONNECTION_LOGS_TABLE}' is ACTIVE and ready")
 
     except ClientError as e:
         if e.response["Error"]["Code"] == "ResourceNotFoundException":
@@ -178,8 +175,8 @@ def _validate_ddb_tables() -> None:
 @app.on_event("startup")
 async def startup_event():
     """Initialize application on startup"""
-    logger.info(f"Starting {settings.SERVICE_NAME} v{settings.SERVICE_VERSION}")
-    logger.info(f"Mastercard API: {settings.MASTERCARD_BASE_URL}")
+    logger.info(f"Starting banking-service v{config.BANKING_SERVICE_VERSION}")
+    logger.info(f"Mastercard API: {config.MASTERCARD_BASE_URL}")
     logger.info(f"DynamoDB Endpoint: {_DDB_ENDPOINT}")
     
     # Validate DynamoDB tables asynchronously
@@ -189,7 +186,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
-    logger.info(f"Shutting down {settings.SERVICE_NAME}")
+    logger.info(f"Shutting down banking-service")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -219,8 +216,8 @@ async def health_check():
     
     return HealthResponse(
         status="healthy",
-        service=settings.SERVICE_NAME,
-        version=settings.SERVICE_VERSION,
+        service="banking-service",
+        version=config.BANKING_SERVICE_VERSION,
         database=database_status,
         cache=cache_status
     )
@@ -233,7 +230,7 @@ async def root():
     """
     return {
         "service": "Banking Service",
-        "version": settings.SERVICE_VERSION,
+        "version": config.BANKING_SERVICE_VERSION,
         "description": "Bank account linking and management",
         "documentation": "/docs",
         "health": "/health",
@@ -252,7 +249,7 @@ async def root():
 # Include API routers
 app.include_router(
     bank_accounts.router,
-    prefix=f"{settings.API_V1_PREFIX}",
+    prefix=f"{config.BANKING_API_V1_PREFIX}",
     tags=["bank-accounts"]
 )
 
@@ -272,7 +269,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=settings.SERVICE_PORT,
+        port=config.BANKING_SERVICE_PORT,
         reload=False,
         log_level="info"
     )
