@@ -21,6 +21,8 @@
 
 This architecture implements a **WSO2 API Management (APIM) 4.6.0** solution integrated with **WSO2 Identity Server (IS) 7.1.0** acting as a Key Manager. The entire stack is containerized using Docker Compose and uses MySQL 8.0.33 as the shared database backend.
 
+**Note**: This document focuses on the WSO2 components (IS, APIM, MySQL). The complete architecture includes 6+ microservices (forex, ledger, payment, profile, rule-engine, wallet) and additional infrastructure (DynamoDB, Redis, Redpanda, Jaeger, OTel, PostgreSQL, BRMS) not covered in this WSO2-specific documentation.
+
 ### Key Features
 - **API Management**: Full API lifecycle management with WSO2 APIM 4.6.0
 - **Identity & Access Management**: WSO2 IS 7.1.0 as Key Manager for OAuth2/OIDC flows
@@ -35,6 +37,7 @@ This architecture implements a **WSO2 API Management (APIM) 4.6.0** solution int
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Docker Compose Network                       │
+│                   (global-transfer-network)                      │
 │                                                                   │
 │  ┌──────────────┐      ┌──────────────┐      ┌──────────────┐  │
 │  │              │      │              │      │              │  │
@@ -43,7 +46,9 @@ This architecture implements a **WSO2 API Management (APIM) 4.6.0** solution int
 │  │              │      │              │      │              │  │
 │  │ Port: 3306   │      │ Port: 9444   │      │ Port: 9443   │  │
 │  │              │      │ Port: 9764   │      │ Port: 8280   │  │
-│  └──────────────┘      └──────────────┘      │ Port: 8243   │  │
+│  │              │      │ km.local     │      │ Port: 8243   │  │
+│  │ mysql        │      │ is-as-km     │      │ am.local     │  │
+│  └──────────────┘      └──────────────┘      │ api-manager  │  │
 │         │                     │               └──────────────┘  │
 │         │                     │                      │           │
 │         └─────────────────────┴──────────────────────┘           │
@@ -194,6 +199,8 @@ ADD --chown=wso2carbon:wso2 wso2/reposistory/components/lib/mysql-connector-j-8.
 **Configuration in docker-compose.yml**:
 - **Ports**: 9444:9443 (HTTPS), 9764:9763 (HTTP)
 - **Dependencies**: `mysql` (service_healthy condition)
+- **Network**: global-transfer-network
+  - **Aliases**: `km.local`, `is-as-km` (default container name)
 - **Volumes**:
   - `deployment.toml` - Main configuration file
   - `client-truststore.p12` - Client truststore
@@ -221,6 +228,11 @@ ADD --chown=wso2carbon:wso2 wso2/reposistory/components/lib/mysql-connector-j-8.
 **Configuration in docker-compose.yml**:
 - **Ports**: 9443:9443 (HTTPS), 8280:8280 (HTTP Gateway), 8243:8243 (HTTPS Gateway)
 - **Dependencies**: `mysql` and `is-as-km` (both service_healthy condition)
+- **Network**: global-transfer-network
+  - **Aliases**: `am.local`, `api-manager` (default container name)
+- **Environment Variables**:
+  - `JAVA_OPTS=-Dorg.wso2.ignoreHostnameVerification=true -Dhttpclient.hostnameVerifier=AllowAll`
+  - Purpose: Disables hostname verification for inter-container communication
 - **Volumes**:
   - `deployment.toml` - Main configuration file
   - `client-truststore.jks` - Client truststore
@@ -228,6 +240,46 @@ ADD --chown=wso2carbon:wso2 wso2/reposistory/components/lib/mysql-connector-j-8.
 - **Health Check**:
   - Test: `curl --fail http://localhost:9763/services/Version`
   - Interval: 10s, Start Period: 180s, Retries: 20
+
+---
+
+## Container Networking & DNS Resolution
+
+All WSO2 services communicate using Docker's internal DNS resolution on the `global-transfer-network` bridge network.
+
+### Service Naming Convention
+
+Each service can be accessed using multiple names:
+
+1. **Default Container Name**: Automatically assigned by Docker Compose (service name from docker-compose.yml)
+   - `mysql`, `is-as-km`, `api-manager`
+
+2. **Network Aliases**: Custom DNS aliases defined in docker-compose.yml
+   - `km.local` (for IS-AS-KM)
+   - `am.local` (for API Manager)
+
+### Internal vs External Access
+
+**Internal Communication (Container-to-Container)**:
+- Services use container names or network aliases
+- Example: IS notifies APIM at `https://api-manager:9443/internal/data/v1/notify`
+- Example: APIM connects to MySQL at `jdbc:mysql://mysql:3306/WSO2AM_DB`
+
+**External Access (Host-to-Container)**:
+- Use `localhost` with mapped ports
+- Example: Access APIM Publisher at `https://localhost:9443/publisher`
+- Example: Access IS Console at `https://localhost:9444/carbon`
+
+### Why Hostname Verification is Disabled
+
+The API Manager has `JAVA_OPTS` set to disable hostname verification:
+```bash
+-Dorg.wso2.ignoreHostnameVerification=true -Dhttpclient.hostnameVerifier=AllowAll
+```
+
+**Reason**: SSL certificates are issued for `localhost`, but internal communication uses container names (`is-as-km`, `api-manager`). This mismatch would cause SSL verification failures without these flags.
+
+**Security Note**: This is acceptable for development/testing but should be addressed in production by using proper certificates with SANs (Subject Alternative Names) that include all service names.
 
 ---
 
@@ -241,9 +293,9 @@ ADD --chown=wso2carbon:wso2 wso2/reposistory/components/lib/mysql-connector-j-8.
 
 ```toml
 [server]
-hostname = "localhost"
+hostname = "is-as-km"
 node_ip = "127.0.0.1"
-base_path = "https://localhost:9443"
+base_path = "https://$ref{server.hostname}:${carbon.management.port}"
 
 [super_admin]
 username = "admin"
@@ -371,15 +423,28 @@ iat_validity_period = "1h"
 
 **Token Revocation Event Listener**:
 ```toml
+# In IS-AS-KM deployment.toml
 [[event_listener]]
 id = "token_revocation"
 type = "org.wso2.carbon.identity.core.handler.AbstractIdentityHandler"
 name = "org.wso2.is.notification.ApimOauthEventInterceptor"
 order = 1
 [event_listener.properties]
-notification_endpoint = "https://localhost:9443/internal/data/v1/notify"
-username = "admin"
-password = "admin"
+notification_endpoint = "https://api-manager:9443/internal/data/v1/notify"
+username = "${admin.username}"
+password = "${admin.password}"
+'header.X-WSO2-KEY-MANAGER' = "WSO2IS"
+
+# In API Manager deployment.toml
+[[event_listener]]
+id = "token_revocation"
+type = "org.wso2.carbon.identity.core.handler.AbstractIdentityHandler"
+name = "org.wso2.is.notification.ApimOauthEventInterceptor"
+order = 1
+[event_listener.properties]
+notification_endpoint = "https://localhost:${mgt.transport.https.port}/internal/data/v1/notify"
+username = "${admin.username}"
+password = "${admin.password}"
 'header.X-WSO2-KEY-MANAGER' = "default"
 ```
 
@@ -453,7 +518,14 @@ The WSO2 Identity Server is configured as a **Key Manager** for the API Manager.
    (Port 9444)                         (Port 9443)
 ```
 
-**Event Listener in APIM**:
+**Event Listener Configuration**:
+
+**In IS-AS-KM** (notifies APIM):
+- Endpoint: `https://api-manager:9443/internal/data/v1/notify`
+- Header: `X-WSO2-KEY-MANAGER: WSO2IS`
+- Triggers: Token revocations from IS to APIM
+
+**In APIM** (self-notification):
 - Endpoint: `https://localhost:9443/internal/data/v1/notify`
 - Header: `X-WSO2-KEY-MANAGER: default`
 - Triggers: User/Application deletions, token revocations
@@ -489,31 +561,33 @@ Both IS and APIM share the same user store via their respective shared databases
 
 ### Port Mappings
 
-| Service | Internal Port | External Port | Protocol | Purpose |
-|---------|--------------|---------------|----------|---------|
-| **MySQL** | 3306 | 3306 | TCP | Database connections |
-| **IS-AS-KM** | 9443 | 9444 | HTTPS | Management console, APIs |
-| **IS-AS-KM** | 9763 | 9764 | HTTP | HTTP transport |
-| **API Manager** | 9443 | 9443 | HTTPS | Publisher, DevPortal, Admin |
-| **API Manager** | 8280 | 8280 | HTTP | API Gateway (HTTP) |
-| **API Manager** | 8243 | 8243 | HTTPS | API Gateway (HTTPS) |
+| Service | Internal Port | External Port | Protocol | Purpose | Network Alias |
+|---------|--------------|---------------|----------|---------|----------------|
+| **MySQL** | 3306 | 3306 | TCP | Database connections | mysql |
+| **IS-AS-KM** | 9443 | 9444 | HTTPS | Management console, APIs | is-as-km, km.local |
+| **IS-AS-KM** | 9763 | 9764 | HTTP | HTTP transport | is-as-km, km.local |
+| **API Manager** | 9443 | 9443 | HTTPS | Publisher, DevPortal, Admin | api-manager, am.local |
+| **API Manager** | 8280 | 8280 | HTTP | API Gateway (HTTP) | api-manager, am.local |
+| **API Manager** | 8243 | 8243 | HTTPS | API Gateway (HTTPS) | api-manager, am.local |
 
 ### Service URLs
 
 #### Identity Server (Key Manager)
-- **Management Console**: https://localhost:9444/carbon
-- **OAuth2 Authorize**: https://localhost:9444/oauth2/authorize
-- **Token Endpoint**: https://localhost:9444/oauth2/token
-- **User Info**: https://localhost:9444/oauth2/userinfo
+- **Management Console**: https://localhost:9444/carbon (external) or https://is-as-km:9443/carbon (internal)
+- **OAuth2 Authorize**: https://localhost:9444/oauth2/authorize (external) or https://is-as-km:9443/oauth2/authorize (internal)
+- **Token Endpoint**: https://localhost:9444/oauth2/token (external) or https://is-as-km:9443/oauth2/token (internal)
+- **User Info**: https://localhost:9444/oauth2/userinfo (external) or https://is-as-km:9443/oauth2/userinfo (internal)
 - **Health Check**: https://localhost:9444/api/health-check/v1.0/health
+- **Network Aliases**: is-as-km, km.local
 
 #### API Manager
-- **Publisher Portal**: https://localhost:9443/publisher
-- **Developer Portal**: https://localhost:9443/devportal
-- **Admin Portal**: https://localhost:9443/admin
-- **Carbon Console**: https://localhost:9443/carbon
-- **API Gateway (HTTP)**: http://localhost:8280
-- **API Gateway (HTTPS)**: https://localhost:8243
+- **Publisher Portal**: https://localhost:9443/publisher (external) or https://api-manager:9443/publisher (internal)
+- **Developer Portal**: https://localhost:9443/devportal (external) or https://api-manager:9443/devportal (internal)
+- **Admin Portal**: https://localhost:9443/admin (external) or https://api-manager:9443/admin (internal)
+- **Carbon Console**: https://localhost:9443/carbon (external) or https://api-manager:9443/carbon (internal)
+- **API Gateway (HTTP)**: http://localhost:8280 (external) or http://api-manager:8280 (internal)
+- **API Gateway (HTTPS)**: https://localhost:8243 (external) or https://api-manager:8243 (internal)
+- **Network Aliases**: api-manager, am.local
 
 ---
 
@@ -821,6 +895,21 @@ SELECT * FROM UM_CLAIM WHERE UM_CLAIM_URI LIKE '%accountLocked%';
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: 2025  
-**Maintainer**: Global Transfer Backend Team
+## Document Revision History
+
+**Version 2.0** - November 20, 2025
+- ✅ Fixed IS hostname configuration (is-as-km, not localhost)
+- ✅ Corrected token revocation endpoints and headers
+- ✅ Added network aliases and DNS resolution documentation
+- ✅ Documented JAVA_OPTS for hostname verification bypass
+- ✅ Added internal vs external access patterns
+- ✅ Clarified container networking and service communication
+- ✅ Updated all service URLs with both internal and external formats
+
+**Version 1.0** - 2025
+- Initial documentation
+
+---
+
+**Maintainer**: Global Transfer Backend Team  
+**Status**: ✅ Verified against actual implementation
