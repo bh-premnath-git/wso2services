@@ -426,8 +426,8 @@ services:
 
   rule-engine-service:
     build:
-      context: ./app_services
-      dockerfile: rule_engine_service/Dockerfile
+      context: ./app_services/rule_engine_service
+      dockerfile: Dockerfile
     container_name: rule-engine-service
     ports:
       - "8005:8005"
@@ -436,27 +436,7 @@ services:
     environment:
       - SERVICE_NAME=rule_engine_service
       - SERVICE_PORT=8005
-      - REDIS_URL=redis://:redis-secret@redis:6379/4
-      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
-      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - OTEL_SERVICE_NAME=rule-engine-service
-      # BRMS Integration (set BRMS_ENABLED=true in .env to enable)
-      - BRMS_ENABLED=${BRMS_ENABLED:-false}
-      - BRMS_URL=${BRMS_URL:-http://brms:80}
-      - BRMS_PROJECT_ID=${BRMS_PROJECT_ID:-}
-      - BRMS_TOKEN=${BRMS_TOKEN:-}
-    depends_on:
-      redis:
-        condition: service_healthy
-      redpanda:
-        condition: service_healthy
-      dynamodb-local:
-        condition: service_started
-      otel-collector:
-        condition: service_started
-      brms:
-        condition: service_started
+      - RULES_DIR=/app/rules
     networks:
       - global-transfer-network 
     restart: unless-stopped
@@ -560,50 +540,6 @@ services:
       retries: 3
       start_period: 40s
 
-  pg-database:
-    image: postgres:18.0
-    container_name: pg-database
-    env_file:
-      - .env
-    environment:
-      POSTGRES_USER: ${BRMS_DB_USER}
-      POSTGRES_PASSWORD: ${BRMS_DB_PASSWORD}
-      POSTGRES_DB: ${BRMS_DB_NAME}
-    ports:
-      - "5433:5432"
-    volumes:
-      - brms-postgres-data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - global-transfer-network 
-    restart: unless-stopped
-
-  brms:
-    image: gorules/brms:latest
-    container_name: brms
-    env_file:
-      - .env
-    ports:
-      - "9080:80"
-    depends_on:
-      pg-database:
-        condition: service_healthy
-    environment:
-      DB_HOST: pg-database
-      DB_PORT: 5432
-      DB_USER: ${BRMS_DB_USER}
-      DB_PASSWORD: ${BRMS_DB_PASSWORD}
-      DB_NAME: ${BRMS_DB_NAME}
-      DB_SSL_DISABLED: true
-      LICENSE_KEY: ${BRMS_LICENSE_KEY}
-    networks:
-      - global-transfer-network 
-    restart: unless-stopped
-
 networks:
   global-transfer-network :
     driver: bridge
@@ -613,4 +549,3 @@ volumes:
   dynamodb-data:
   redis-data:
   redpanda-data:
-  brms-postgres-data:

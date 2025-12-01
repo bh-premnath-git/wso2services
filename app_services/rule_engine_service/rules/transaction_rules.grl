@@ -1,0 +1,281 @@
+// ========================================================================
+// PRODUCTION-GRADE gRULE TRANSACTION VALIDATION SYSTEM
+// Focus: USA, UK, Canada, India, UAE
+// Features: Nested objects, chaining, velocity, KYC tiers, geo risk
+// ========================================================================
+
+// ========================================================================
+// TIER 1: HARD BLOCKS (Salience 150-200)
+// ========================================================================
+
+rule BlacklistedUserBlock "Auto-block blacklisted users" salience 200 {
+    when
+        Input.User.IsBlacklisted == true
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 1.0;
+        Output.Message = "Account suspended";
+        Output.AddRuleApplied("blacklist_block");
+        Retract("BlacklistedUserBlock");
+}
+
+rule FraudHistoryBlock "Auto-block users with fraud history" salience 190 {
+    when
+        Input.User.HasViolation("fraud")
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 1.0;
+        Output.Message = "Blocked: fraud history detected";
+        Output.AddRuleApplied("fraud_history");
+        Retract("FraudHistoryBlock");
+}
+
+rule SanctionedCountryBlock "Block sanctioned countries" salience 180 {
+    when
+        Input.Country.In("IR", "KP", "SY")
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 1.0;
+        Output.Message = "Transaction blocked: sanctioned country";
+        Output.AddRuleApplied("country_sanctions");
+        Retract("SanctionedCountryBlock");
+}
+
+// ========================================================================
+// TIER 2: TRUSTED USER FAST PASS (Salience 140)
+// ========================================================================
+
+rule TrustedUserFastPass "Premium trusted users get expedited approval" salience 140 {
+    when
+        Output.Message == "" &&
+        Input.User.KycLevel == 3 &&
+        Input.User.AccountAgeMonths > 12 &&
+        Input.User.NoViolation == true &&
+        Input.Txn.Amount <= 20000
+    then
+        Output.Allowed = true;
+        Output.RiskScore = 0.05;
+        Output.Message = "FastPass approved - trusted user";
+        Output.AddRuleApplied("trusted_fastpass");
+        Retract("TrustedUserFastPass");
+}
+
+// ========================================================================
+// TIER 3: TRANSACTION TYPE CHECKS (Salience 115-125)
+// ========================================================================
+
+rule CryptoHighRisk "Crypto transactions have stricter limits" salience 125 {
+    when
+        Output.Message == "" &&
+        Input.Txn.Type == "crypto" &&
+        Input.Txn.Amount > 5000
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.7;
+        Output.Message = "Crypto transaction requires compliance review";
+        Output.AddRuleApplied("crypto_review");
+        Retract("CryptoHighRisk");
+}
+
+rule LargeWithdrawalReview "Withdrawals > $50k need verification" salience 120 {
+    when
+        Output.Message == "" &&
+        Input.Txn.Type == "withdrawal" &&
+        Input.Txn.Amount > 50000
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.75;
+        Output.Message = "Large withdrawal requires verification";
+        Output.AddRuleApplied("large_withdrawal");
+        Retract("LargeWithdrawalReview");
+}
+
+rule FlaggedTransactionReview "Flagged txns need manager approval" salience 115 {
+    when
+        Output.Message == "" &&
+        Input.Txn.Amount > 50000
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.9;
+        Output.Message = "Manager approval required for large transaction";
+        Output.AddRuleApplied("large_txn_flagged");
+        Output.AddRuleApplied("manager_approval");
+        Retract("FlaggedTransactionReview");
+}
+
+// ========================================================================
+// TIER 4: BEHAVIORAL & VELOCITY CHECKS (Salience 111-113)
+// ========================================================================
+
+rule VelocityCheck "Rapid-fire transactions flagged" salience 113 {
+    when
+        Output.Message == "" &&
+        Input.User.RecentTxnCount > 5
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.8;
+        Output.Message = "Suspicious velocity: too many recent transactions";
+        Output.AddRuleApplied("velocity_check");
+        Retract("VelocityCheck");
+}
+
+rule ChargebackHistory "Users with chargeback history need review" salience 111 {
+    when
+        Output.Message == "" &&
+        Input.User.HasViolation("chargeback") &&
+        Input.Txn.Amount > 2000
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.7;
+        Output.Message = "Manual review: chargeback history";
+        Output.AddRuleApplied("chargeback_review");
+        Retract("ChargebackHistory");
+}
+
+// ========================================================================
+// TIER 5: GEOGRAPHIC & DEVICE RISK (Salience 105-110)
+// ========================================================================
+
+rule DeviceCountryMismatch "Block if device location != transaction country" salience 110 {
+    when
+        Output.Message == "" &&
+        Input.Device.DeviceCountry != Input.Country &&
+        Input.Txn.Amount > 5000
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.85;
+        Output.Message = "Suspicious: device-country mismatch";
+        Output.AddRuleApplied("device_mismatch");
+        Retract("DeviceCountryMismatch");
+}
+
+rule VPNHighRisk "Flag VPN usage for high-value transactions" salience 108 {
+    when
+        Output.Message == "" &&
+        Input.Device.IsVPN == true &&
+        Input.Txn.Amount > 10000
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.75;
+        Output.Message = "VPN detected on high-value transaction";
+        Output.AddRuleApplied("vpn_risk");
+        Retract("VPNHighRisk");
+}
+
+rule LowRiskCountryStandard "USA/UK/Canada - low risk tier" salience 107 {
+    when
+        Output.Message == "" &&
+        Input.Country.In("US", "GB", "CA") &&
+        Input.Txn.Amount <= 50000 &&
+        Input.User.KycLevel >= 1
+    then
+        Output.Allowed = true;
+        Output.RiskScore = 0.15;
+        Output.Message = "Approved - low risk country";
+        Output.AddRuleApplied("low_risk_geo");
+        Output.AddRuleApplied("kyc_verified");
+        Retract("LowRiskCountryStandard");
+}
+
+rule MediumLowRiskCountry "India/UAE - medium-low risk tier" salience 105 {
+    when
+        Output.Message == "" &&
+        Input.Country.In("IN", "AE") &&
+        Input.Txn.Amount <= 30000 &&
+        Input.User.KycLevel >= 2
+    then
+        Output.Allowed = true;
+        Output.RiskScore = 0.25;
+        Output.Message = "Approved with enhanced monitoring";
+        Output.AddRuleApplied("medium_low_risk_geo");
+        Output.AddRuleApplied("enhanced_kyc");
+        Retract("MediumLowRiskCountry");
+}
+
+// ========================================================================
+// TIER 6: KYC-BASED RULES (Salience 70-80)
+// ========================================================================
+
+rule WeakKYCLimit "No KYC users limited to $1000" salience 80 {
+    when
+        Output.Message == "" &&
+        Input.User.KycLevel == 0 &&
+        Input.Txn.Amount > 1000
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.65;
+        Output.Message = "Complete KYC to proceed";
+        Output.AddRuleApplied("no_kyc_limit");
+        Retract("WeakKYCLimit");
+}
+
+rule BasicKYCLimit "Basic KYC users limited to $10k" salience 75 {
+    when
+        Output.Message == "" &&
+        Input.User.KycLevel == 1 &&
+        Input.Txn.Amount > 10000
+    then
+        Output.Allowed = false;
+        Output.RiskScore = 0.55;
+        Output.Message = "Upgrade to verified KYC for higher limits";
+        Output.AddRuleApplied("basic_kyc_limit");
+        Retract("BasicKYCLimit");
+}
+
+// ========================================================================
+// TIER 6: MONITORING & SOFT BLOCKS (Salience 30-40)
+// ========================================================================
+
+rule HolidayRiskIncrease "Holiday transactions carry extra risk" salience 40 {
+    when
+        Output.Message == "" &&
+        Input.Txn.IsHoliday == true &&
+        Input.Txn.Amount > 15000
+    then
+        Output.Allowed = true;
+        Output.RiskScore = 0.4;
+        Output.Message = "Approved with holiday monitoring";
+        Output.AddRuleApplied("holiday_monitoring");
+        Retract("HolidayRiskIncrease");
+}
+
+rule MediumAmountMonitoring "Medium amounts get monitoring" salience 35 {
+    when
+        Output.Message == "" &&
+        Input.Txn.Amount >= 10000 &&
+        Input.Txn.Amount <= 25000
+    then
+        Output.Allowed = true;
+        Output.RiskScore = 0.3;
+        Output.Message = "Approved with monitoring";
+        Output.AddRuleApplied("medium_amount_monitoring");
+        Retract("MediumAmountMonitoring");
+}
+
+// ========================================================================
+// TIER 7: STANDARD & DEFAULT (Salience 10-20)
+// ========================================================================
+
+rule StandardLowRisk "Standard low-risk transactions" salience 20 {
+    when
+        Output.Message == "" &&
+        Input.Txn.Amount <= 5000 &&
+        Input.User.KycLevel >= 1
+    then
+        Output.Allowed = true;
+        Output.RiskScore = 0.1;
+        Output.Message = "Transaction approved";
+        Output.AddRuleApplied("standard_approval");
+        Retract("StandardLowRisk");
+}
+
+rule DefaultApproval "Default approval for other cases" salience 10 {
+    when
+        Output.Message == ""
+    then
+        Output.Allowed = true;
+        Output.RiskScore = 0.35;
+        Output.Message = "Transaction approved - standard verification";
+        Output.AddRuleApplied("default_approval");
+        Retract("DefaultApproval");
+}
