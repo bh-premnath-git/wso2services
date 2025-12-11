@@ -1,0 +1,305 @@
+=============================================================================
+MARKETPLACE SERVICE API EXAMPLES
+=============================================================================
+
+Service URL: http://localhost:8009
+Docs: http://localhost:8009/docs
+
+=============================================================================
+1. ADMIN APIs - Configuration Management
+=============================================================================
+
+--- PSPs (Payment Service Providers) ---
+
+# Create PSP
+POST /admin/psps
+{
+  "id": "stripe",
+  "name": "Stripe",
+  "type": "CARD",
+  "status": "ACTIVE",
+  "capabilities": ["payouts", "collections", "card-only"],
+  "regions_supported": ["US", "IN", "GB", "EU"],
+  "metadata": {"settlement_time_hours": 24, "requires_cvv": true}
+}
+
+# List all PSPs
+GET /admin/psps?skip=0&limit=100
+
+# Get specific PSP
+GET /admin/psps/stripe
+
+# Update PSP
+PUT /admin/psps/stripe
+{
+  "status": "INACTIVE"
+}
+
+# Delete PSP
+DELETE /admin/psps/stripe
+
+
+--- Corridors ---
+
+# Create Corridor
+POST /admin/corridors
+{
+  "id": "IN-US-INR-USD",
+  "source_country": "IN",
+  "dest_country": "US",
+  "source_currency": "INR",
+  "dest_currency": "USD",
+  "status": "ACTIVE",
+  "default_route_policy": "PRIORITY"
+}
+
+# List corridors
+GET /admin/corridors
+
+# Update corridor
+PUT /admin/corridors/IN-US-INR-USD
+{
+  "status": "DISABLED"
+}
+
+
+--- Channels ---
+
+# Create Channel
+POST /admin/channels
+{
+  "id": "card_to_bank",
+  "code": "CARD_TO_BANK",
+  "description": "Card to bank transfer",
+  "is_consumer_visible": true
+}
+
+# List channels
+GET /admin/channels
+
+
+--- Corridor Routes (PSP Routing Configuration) ---
+
+# Create Route
+POST /admin/routes
+{
+  "id": "IN-US-CARD-STRIPE",
+  "corridor_id": "IN-US-INR-USD",
+  "channel_id": "card_to_bank",
+  "psp_id": "stripe",
+  "priority": 1,
+  "weight": 80,
+  "min_amount": 1.0,
+  "max_amount": 200000.0,
+  "status": "ACTIVE",
+  "metadata": {"requires_cvv": true, "requires_address": true}
+}
+
+# List routes (with filters)
+GET /admin/routes?corridor_id=IN-US-INR-USD&channel_id=card_to_bank
+
+# Update route
+PUT /admin/routes/IN-US-CARD-STRIPE
+{
+  "priority": 2,
+  "status": "MAINTENANCE"
+}
+
+
+--- Fees ---
+
+# Create Fee
+POST /admin/fees
+{
+  "id": "FEE-STRIPE-1",
+  "corridor_route_id": "IN-US-CARD-STRIPE",
+  "fee_type": "MIXED",
+  "value_flat": 50.0,
+  "value_percent": 0.5,
+  "min_fee": 50.0,
+  "max_fee": 500.0
+}
+
+# List fees for a route
+GET /admin/fees?corridor_route_id=IN-US-CARD-STRIPE
+
+
+=============================================================================
+2. RUNTIME APIs - For Orchestrator/Rule Engine
+=============================================================================
+
+--- Get Routing Candidates ---
+
+# Main API used by Payment Orchestrator
+POST /runtime/routing/candidates
+{
+  "source_country": "IN",
+  "dest_country": "US",
+  "source_currency": "INR",
+  "dest_currency": "USD",
+  "channel_code": "CARD_TO_BANK",
+  "amount": 10000,
+  "user_segment": "STANDARD",
+  "partner_id": null
+}
+
+Response:
+{
+  "corridor": {
+    "id": "IN-US-INR-USD",
+    "status": "ACTIVE"
+  },
+  "channel": {
+    "id": "card_to_bank",
+    "description": "Card to bank transfer"
+  },
+  "candidates": [
+    {
+      "psp_id": "stripe",
+      "priority": 1,
+      "weight": 80,
+      "constraints": {
+        "min_amount": 1.0,
+        "max_amount": 200000.0
+      },
+      "fees": {
+        "type": "MIXED",
+        "flat": 50.0,
+        "percent": 0.5,
+        "min_fee": 50.0,
+        "max_fee": 500.0
+      },
+      "metadata": {
+        "requires_cvv": true,
+        "requires_address": true,
+        "settlement_time_hours": 24
+      }
+    },
+    {
+      "psp_id": "mastercard_send",
+      "priority": 2,
+      "weight": 20,
+      "constraints": {
+        "min_amount": 1000.0,
+        "max_amount": 500000.0
+      },
+      "fees": {
+        "type": "PERCENTAGE",
+        "percent": 0.7
+      },
+      "metadata": {
+        "settlement_time_hours": 12
+      }
+    }
+  ]
+}
+
+
+--- List Corridors (for customer-facing apps) ---
+
+GET /runtime/corridors
+
+Response:
+[
+  {
+    "id": "IN-US-INR-USD",
+    "status": "ACTIVE"
+  },
+  {
+    "id": "US-IN-USD-INR",
+    "status": "ACTIVE"
+  }
+]
+
+
+--- List Channels ---
+
+GET /runtime/channels
+
+Response:
+[
+  {
+    "id": "card_to_bank",
+    "description": "Card to bank transfer"
+  },
+  {
+    "id": "bank_to_bank",
+    "description": "Bank to bank transfer"
+  }
+]
+
+
+=============================================================================
+3. INTEGRATION WITH ORCHESTRATOR + RULE ENGINE
+=============================================================================
+
+Flow:
+1. User initiates payment request
+2. Orchestrator calls Marketplace: POST /runtime/routing/candidates
+3. Marketplace returns structured candidate list with PSPs, fees, constraints
+4. Orchestrator calls Rule Engine with candidates + user context
+5. Rule Engine returns: selected PSP, fallbacks, applied fees, reason
+6. Orchestrator executes payment via selected PSP adapter
+
+Example Rule Engine Input (from Orchestrator):
+{
+  "user": {
+    "id": "user_123",
+    "kyc_level": 2,
+    "risk_score": 0.3
+  },
+  "transaction": {
+    "corridor": "IN-US-INR-USD",
+    "channel_code": "CARD_TO_BANK",
+    "amount": 10000
+  },
+  "candidates": [/* from Marketplace response */],
+  "context": {
+    "recent_psp_failures": {
+      "stripe": 0.03,
+      "mastercard_send": 0.15
+    },
+    "system_load": {
+      "stripe": "NORMAL",
+      "mastercard_send": "HIGH"
+    }
+  }
+}
+
+Rule Engine Output:
+{
+  "decision": "ALLOW",
+  "selected_psp": "stripe",
+  "fallback_psps": ["mastercard_send"],
+  "applied_fee": {
+    "total": 120,
+    "breakdown": {"flat": 50, "percent": 70}
+  },
+  "reason": "Stripe preferred: lower fee (0.5% vs 0.7%), lower failure rate (3% vs 15%)"
+}
+
+
+=============================================================================
+4. DATABASE INITIALIZATION
+=============================================================================
+
+# Initialize database with sample data
+docker exec -it marketplace-service python -m app.init_db
+
+Or from host:
+cd /home/premnath/global-transfer-backend/app_services/marketplace_service
+python -m app.init_db
+
+
+=============================================================================
+5. HEALTH CHECK
+=============================================================================
+
+GET /health
+
+Response:
+{
+  "status": "healthy",
+  "service": "marketplace_service",
+  "version": "1.0.0"
+}

@@ -177,6 +177,67 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    command: >
+      server -dev
+      -dev-root-token-id=root
+      -dev-listen-address=0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    volumes:
+      - vault-data:/vault/data
+    networks: [ global-transfer-network  ]
+  
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin        # dev only
+      MINIO_ROOT_PASSWORD: minioadmin    # dev only
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO Console
+    volumes:
+      - minio-data:/data                 # persistent storage for objects
+    networks: [ global-transfer-network  ]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [ global-transfer-network ]
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb local/kyc-documents --ignore-existing;
+      mc anonymous set download local/kyc-documents;
+      echo 'MinIO bucket kyc-documents created successfully';
+      exit 0;
+      "
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-tunnel
+    depends_on:
+      - profile-service
+    command: tunnel --no-autoupdate --url http://profile-service:8004
+    networks: [ global-transfer-network ]
+    restart: unless-stopped
+
   # Application Services
   forex-service:
     build:
@@ -497,6 +558,8 @@ services:
     extra_hosts:
       - "api.finicity.com:45.223.18.70"
       - "connect2.finicity.com:45.223.18.70"
+    env_file:
+      - .env
     environment:
       - SERVICE_NAME=banking_service
       - SERVICE_PORT=8007
@@ -540,6 +603,41 @@ services:
       retries: 3
       start_period: 40s
 
+  marketplace-service:
+    build:
+      context: ./app_services
+      dockerfile: marketplace_service/Dockerfile
+    container_name: marketplace-service
+    ports:
+      - "8009:8009"
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=marketplace_service
+      - MARKETPLACE_SERVICE_PORT=8009
+      - MARKETPLACE_DB_TYPE=mysql
+      - MARKETPLACE_DB_NAME=marketplace_db
+      - MARKETPLACE_DB_HOST=mysql
+      - MARKETPLACE_DB_PORT=3306
+      - MARKETPLACE_DB_USER=root
+      - MARKETPLACE_DB_PASSWORD=${MYSQL_ROOT_PASSWORD:-root}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=marketplace-service
+    depends_on:
+      mysql:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    networks:
+      - global-transfer-network 
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 networks:
   global-transfer-network :
     driver: bridge
@@ -549,3 +647,5 @@ volumes:
   dynamodb-data:
   redis-data:
   redpanda-data:
+  minio-data:
+  vault-data:
